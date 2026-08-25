@@ -80,24 +80,55 @@ export function ambientHeightAt(x: number, z: number): number {
     );
 }
 
-/** Terrain height at an absolute world position. */
-export function heightAt(x: number, z: number): number {
-    // The corridor is flattened to the ROAD's elevation at this z, not to a
-    // constant — so the terrain follows the road over crests and through dips
-    // and the two can never separate.
-    const level = roadLevelAt(z);
-    const distToCenter = Math.abs(x - roadCenterX(z));
+/**
+ * The road terms of the height field at one Z — everything that does NOT vary
+ * with x. Hoisting these out of a scan along x saves four trig calls per sample,
+ * which is why the chunk builder samples row by row.
+ */
+export interface HeightRow {
+    centreX: number;
+    level: number;
+}
+
+/** Fills `out` with the road terms at absolute world Z. */
+export function heightRowAt(z: number, out: HeightRow): void {
+    out.centreX = roadCenterX(z);
+    out.level = roadLevelAt(z);
+}
+
+/**
+ * Terrain height, given the road terms for this Z already computed. The single
+ * definition of the surface — `heightAt` is a convenience wrapper over it, so
+ * there is no second copy of this logic to drift out of sync.
+ */
+export function heightInRow(x: number, z: number, row: HeightRow): number {
+    const distToCenter = Math.abs(x - row.centreX);
 
     // Inside the corridor the surface is exactly flat. Not "nearly flat" — the
     // car's own Y and the collision maths both assume a level road. The corridor
     // is wider than the asphalt by FLAT_MARGIN; see that constant for why.
-    if (distToCenter <= CORRIDOR_HALF_WIDTH) return level;
+    if (distToCenter <= CORRIDOR_HALF_WIDTH) return row.level;
 
     // Shoulder: ease from the road's own level out to ambient. Anchoring to the
     // road level (rather than blending ambient against ambient) is what
     // guarantees flush contact at the edge.
     const t = smoothstep(0, cfg.road.shoulderWidth, distToCenter - CORRIDOR_HALF_WIDTH);
-    return lerp(level, ambientHeightAt(x, z), t);
+    return lerp(row.level, ambientHeightAt(x, z), t);
+}
+
+/** Scratch row for `heightAt`. Single-threaded and never nested, so it's safe. */
+const _row: HeightRow = { centreX: 0, level: 0 };
+
+/**
+ * Terrain height at an absolute world position.
+ *
+ * The corridor is flattened to the ROAD's elevation at this z, not to a
+ * constant — so the terrain follows the road over crests and through dips and
+ * the two can never separate.
+ */
+export function heightAt(x: number, z: number): number {
+    heightRowAt(z, _row);
+    return heightInRow(x, z, _row);
 }
 
 /**
@@ -121,14 +152,23 @@ export function surfaceHeightAt(x: number, z: number): number {
 }
 
 /**
- * Analytic surface normal, from the height field's gradient by central
- * difference. Written into `out` rather than returned as a new vector: this
- * runs once per terrain vertex per chunk rebuild, and the original allocated a
- * THREE.Vector3 every call — thousands of throwaway objects per chunk, which
- * is a GC sawtooth on a phone (ARCHITECTURE.md §4.2).
+ * Analytic surface normal in WORLD space, from the height field's gradient by
+ * central difference. Written into `out` rather than returned as a new vector,
+ * to avoid a throwaway object per call.
  *
- * Deriving the normal from world position rather than from mesh topology is
- * also what keeps lighting seamless across chunk borders.
+ * **The z component is world-space and must be NEGATED for a chunk mesh's local
+ * frame.** A chunk mirrors Z (its local z runs 0 → -size, because forward is
+ * -Z), and mirroring an axis flips the corresponding normal component: local
+ * z is `+∂h/∂Z` where world z is `-∂h/∂Z`. Getting this wrong mis-shades slopes
+ * along the travel axis — measured at up to ~37° of normal error on the steepest
+ * faces — and it doesn't show up in the colour bands, which only read
+ * `normal.y`, so it hides well. It was wrong for exactly that reason until the
+ * grid-normal rewrite.
+ *
+ * `chunkMesh` no longer uses this — it derives normals from the heights it has
+ * already sampled, at ~1 field evaluation per vertex instead of 5. This is kept
+ * for callers that need a normal at an arbitrary point (aligning scattered
+ * objects to the ground, for instance).
  */
 export function normalAt(x: number, z: number, out: { x: number; y: number; z: number }, eps = 0.4): void {
     const hL = heightAt(x - eps, z), hR = heightAt(x + eps, z);

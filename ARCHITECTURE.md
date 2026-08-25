@@ -259,26 +259,64 @@ chunk (recycled in bands), or a small number of quads if the road stays
 straight. Lane markings: vertex colors or a procedurally drawn canvas texture —
 never an image file.
 
-### 5.3 Chunk recycling budget — the real perf risk
-`chunkMesh.buildChunkGeometry` at P3W's default `resolution: 33` costs, per
-chunk **[estimate]**:
+### 5.3 Chunk recycling budget — MEASURED on device
 
-- 33×33 = 1089 grid verts + ~128 skirt verts
-- per vertex: 1 `heightAt` + 4 more inside `normalAt` + `terrainColorAt`
-- ⇒ ~5,500 `heightAt` calls, each running a 4-octave fbm plus the ridged
-  mountain mask ⇒ **~50,000 simplex evaluations per chunk**
+No longer an estimate. Numbers below are from a low-end Android phone running
+the dev build, read off the on-screen `PerfHud` (`debug.showPerf`), at
+`chunkSize 40 / resolution 17 / 6 wide × 9 deep = 54 resident chunks`:
 
-That is very likely a **multi-millisecond frame spike every time a chunk
-recycles** — the exact thing that makes an infinite runner feel bad. Mitigations,
-in the order to apply them:
+| | 5 field samples per vertex | 1 sample per vertex (grid normals) |
+|---|---|---|
+| typical chunk build | **4.30 ms** (26% of a 16.7ms frame) | **0.3–1.9 ms** |
+| rolling peak | 4.80 ms | 1.1–1.4 ms |
+| worst in-play build | — | 2.9–4.2 ms |
+| opening 54-chunk burst | — | 28 ms total |
+| worst frame | 19.1 ms | 18.1–20 ms (**unchanged**) |
+| draw calls / triangles | 65–68 / 33–36k | same |
 
-1. **Build at most one chunk per frame** (a work queue), never a batch.
-2. **Lower `resolution`.** A top-down camera sees far less terrain relief than
-   P3W's valley flythrough. Start at 17 and only raise it if it reads as flat.
-3. Fix the allocation churn from §4.2.
-4. Cache a row of heights so `normalAt`'s ±x samples reuse neighbours.
-5. Keep P3W's LOD tiers (full res near, ½ mid, ¼ far) — the skirt already hides
-   the seams.
+Three conclusions that were NOT obvious from desktop:
+
+1. **Desktop is a useless predictor of mobile here.** Desktop measured 0.193ms
+   against the phone's 4.30ms — **22×**, not the 3-5× I assumed. Never
+   extrapolate device performance; that's what the counter is for.
+2. **The cost was the sample count, not the arithmetic.** Four of the five
+   field evaluations per vertex existed only to central-difference a normal.
+   Differencing the already-sampled grid instead (with a one-vertex border ring
+   so seams still agree) was a 6.3× win. See `chunkMesh.ts`.
+3. **Chunk builds were never what caused the worst frame.** Cutting them 6×
+   left `worst` unchanged at ~19ms against a 16.7ms vsync. That residue is GC
+   and scheduler noise — confirmed by A/B'ing frame times with the HUD on and
+   off from outside the page (11.48 vs 11.42ms mean; the HUD-off run had the
+   *worse* maximum). Don't optimise toward it without evidence.
+
+Instrumentation lessons worth keeping, both of which produced wrong conclusions
+before being fixed:
+
+- **Keep load-time work out of dropped-frame metrics.** `buildAllNow` runs the
+  opening 54 chunks before the first frame, cold; its slowest chunk read 19.30ms
+  and made the all-time peak look like a catastrophic regression while the game
+  ran at a locked 60fps.
+- **Never display a duration where a cost is implied.** A `hud` metric reporting
+  the frame time after a repaint read 12.0ms against an 11.2ms mean — alarming,
+  and meaning 0.8ms. It was removed rather than relabelled.
+
+Mitigations if this ever becomes a problem again, in the order to apply them:
+
+1. **Time-budgeted incremental builds** — slice one chunk across several frames
+   against a ms budget rather than a fixed row count, so the queue can't fall
+   behind. This bounds the spike without reducing total work; sustained load is
+   only `9.9 chunks/s × per-chunk cost`, which is 0.71ms per frame even at the
+   old 4.30ms. Designed but not built, since grid normals made it unnecessary.
+2. **Lower `resolution`.** Cost scales with its square.
+3. Fix the allocation churn from §4.2. *(Done at the port.)*
+4. Hoist z-only road terms out of the x scan — `heightRowAt`/`heightInRow`.
+   *(Done; worth ~10% on its own.)*
+5. ~~Keep P3W's LOD tiers~~ — **this does not reduce build cost in a forward
+   scroller, and the original claim here was wrong.** Chunks spawn at the FAR
+   edge and approach the player, so a tiered chunk is re-tessellated on the way
+   in: far + mid + near ≈ 1.37× the cost of one full-resolution build. LOD helps
+   triangles and GPU fill, not CPU. (It also conflicts with grid normals — see
+   the caveat in `chunkMesh.ts`.)
 
 Only measure-then-fix. `showStats: true` plus a `performance.now()` timer around
 the chunk build is the whole instrumentation needed.

@@ -167,8 +167,8 @@ export const gameConfig = {
          * accent on the steepest faces only. Lowering these browns the whole
          * world out fast — at 0.14/0.34 dirt covered 80% of the ground.
          */
-        dirtSlopeStart: 0.22,
-        dirtSlopeFull: 0.44,
+        dirtSlopeStart: 0.20,
+        dirtSlopeFull: 0.42,
         /*
          * Rock has been tuned down twice, because it kept landing where nobody
          * looks. Measured on the real vertex grid:
@@ -188,12 +188,19 @@ export const gameConfig = {
          * The reason rock looked absent was never coverage — it was `world.fogDensity`
          * washing mid-distance terrain to sky colour. See that setting.
          *
+         * Nudged down again when chunk normals moved from analytic central
+         * differences (0.4m) to differencing the sampled grid (2.5m) for a 6.3x
+         * build speedup. Averaging slope over the vertex spacing lowers it
+         * slightly, which cost ~4 points of coverage; 0.20-0.42 and 0.25-0.45
+         * restore it to within half a point (dirt 27.5% vs 28.0%, rock 20.4%
+         * vs 19.8%).
+         *
          * Note this is tuned to PLACEHOLDER hills, whose slopes are gentle.
          * Phase 5's ported ridged-mountain field has genuinely steep faces and
          * will need these raised again, or the world turns grey.
          */
-        rockSlopeStart: 0.28,
-        rockSlopeFull: 0.48,
+        rockSlopeStart: 0.25,
+        rockSlopeFull: 0.45,
     },
 
     /**
