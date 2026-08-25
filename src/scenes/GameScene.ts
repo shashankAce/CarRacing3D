@@ -78,6 +78,13 @@ export class GameScene extends Scene {
             // edge quality is close to invisible. Swap if a reskin targets
             // better hardware.
             renderer.shadowMap.type = THREE.PCFShadowMap;
+
+            // Distant trees are billboards carrying a baked image of their own
+            // mesh. Baking needs a renderer, and the engine creates one lazily
+            // on the first frame — this callback is the earliest point it
+            // exists. Until then the far tier is invisible rather than
+            // untextured.
+            this._scatter.bakeImpostors(renderer as THREE.WebGLRenderer);
         };
 
         this._sky = new SkyDome(sys.scene);

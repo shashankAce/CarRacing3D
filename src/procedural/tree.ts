@@ -24,8 +24,17 @@ import { mergeGeometries, paintGeometry } from './mergeGeometry';
  * hundred affordable at all.
  */
 
+/** A generated variant: its mesh, plus the dimensions a billboard must match. */
+export interface TreeVariant {
+    geometry: THREE.BufferGeometry;
+    /** Total height, ground to tip. */
+    height: number;
+    /** Widest canopy diameter. */
+    width: number;
+}
+
 /** Builds one tree variant. `seed` decides its proportions, so variants differ. */
-export function createTreeGeometry(seed: number): THREE.BufferGeometry {
+export function createTreeGeometry(seed: number): TreeVariant {
     const t = cfg.trees;
     const rand = mulberry32(seed);
     const between = (min: number, max: number) => min + rand() * (max - min);
@@ -82,7 +91,8 @@ export function createTreeGeometry(seed: number): THREE.BufferGeometry {
 
     const merged = mergeGeometries(indexed);
     merged.computeBoundingSphere();
-    return merged;
+    // Widest tier is the lowest one; see the canopy loop above.
+    return { geometry: merged, height, width: height * t.canopyRadiusK * 2 };
 }
 
 /** One material for every variant — colour comes from the baked attribute. */

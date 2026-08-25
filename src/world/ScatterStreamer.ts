@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Node, InstancedMesh3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
-import { createTreeGeometry, createTreeMaterial } from '../procedural/tree';
+import { createTreeGeometry, createTreeMaterial, type TreeVariant } from '../procedural/tree';
+import { bakeTreeImpostor, impostorFrameSize } from '../procedural/treeImpostor';
 import { heightAt, normalAt } from '../procedural/heightField';
 import { roadCenterX } from './roadPath';
 import { mulberry32, hashChunk } from '../procedural/random';
@@ -15,6 +16,15 @@ interface Placement {
     rotationY: number;
     scale: number;
     variant: number;
+}
+
+/** A variant's mesh plus the billboard that stands in for it at distance. */
+interface Variant {
+    tree: TreeVariant;
+    /** Edge length of the square the impostor was baked in, in world units. */
+    frame: number;
+    far: InstancedMesh3D;
+    farBucket: Placement[];
 }
 
 const _normal = { x: 0, y: 1, z: 0 };
@@ -38,12 +48,24 @@ const _normal = { x: 0, y: 1, z: 0 };
  *     placement** (ARCHITECTURE.md §4.2). Matrices here are composed into
  *     scratch objects and written straight to the instance buffer.
  *
- * One InstancedMesh per variant, so the whole forest is `variants` draw calls in
- * the main pass and the same again in the shadow pass.
+ * Two LOD tiers. Near trees are real geometry, one InstancedMesh per variant.
+ * Past `trees.lodCrossover` a tree becomes a single billboard quad carrying a
+ * baked image of a tree — the impostor technique open-world racers use for
+ * vegetation, at 2 triangles against ~60.
+ *
+ * That tier is what lets trees reach the terrain's full draw edge. Before it,
+ * trees stopped at ~200m because geometry all the way out was too expensive —
+ * and fog still leaves ~8% of a tree's colour showing there, so they winked out
+ * while faintly visible. Reaching 280m, where fog leaves 0.006%, makes the
+ * window edge genuinely invisible without any fading trickery. (Both figures are
+ * for the current `world.fogFalloff`; they were 14% and 2% at the old exponent
+ * of 2, which is why the crossover was worth building.)
  */
 export class ScatterStreamer {
 
     private _meshes: InstancedMesh3D[] = [];
+    private _variants: Variant[] = [];
+    private _baked = false;
     private _scroll: WorldScroll;
     /** Placements per live chunk, keyed the same way the terrain keys its own. */
     private _byChunk = new Map<number, Placement[]>();
@@ -56,7 +78,15 @@ export class ScatterStreamer {
     private _euler = new THREE.Euler();
     private _scaleVec = new THREE.Vector3();
 
-    /** Diagnostics for the perf HUD. */
+    /** Diagnostics for the perf HUD: near geometry + far billboards. */
+    private _nearCount = 0;
+    private _farCount = 0;
+
+    /** Trees drawn as real geometry this frame. */
+    get nearCount(): number { return this._nearCount; }
+    /** Trees drawn as billboards this frame. */
+    get farCount(): number { return this._farCount; }
+
     get liveCount(): number {
         let n = 0;
         for (const list of this._byChunk.values()) n += list.length;
@@ -72,7 +102,8 @@ export class ScatterStreamer {
             const mesh = node.addComponent(InstancedMesh3D);
             // Variant seeds are fixed constants, not random: the same build must
             // produce the same forest every run.
-            mesh.geometry = createTreeGeometry(0x7ee5 + v * 977);
+            const variant = createTreeGeometry(0x7ee5 + v * 977);
+            mesh.geometry = variant.geometry;
             mesh.material = material;
             mesh.count = cfg.trees.maxPerVariant;
             mesh.castShadow = cfg.lighting.shadows.enabled;
@@ -84,6 +115,63 @@ export class ScatterStreamer {
             mesh.object3D.count = 0;
             this._meshes.push(mesh);
             this._buckets.push([]);
+
+            // ── Distant tier for this variant ─────────────────────────────
+            // One per variant, not one shared: each carries a baked image of
+            // its OWN mesh, which is the whole point — the crossover then
+            // changes triangle count and nothing else.
+            //
+            // No billboarding needed: the camera never yaws, so a quad facing
+            // +Z always faces it.
+            const farNode = new Node();
+            const far = farNode.addComponent(InstancedMesh3D);
+            far.geometry = new THREE.PlaneGeometry(1, 1);
+            // Starts empty; the real texture is baked once the renderer exists.
+            far.material = new THREE.MeshBasicMaterial({
+                transparent: false, alphaTest: 0.5, visible: false,
+            });
+            far.count = cfg.trees.maxFarInstances;
+            // Billboards don't cast: a flat quad standing in for a 3D shape
+            // casts a rectangle, and at this distance no shadow beats a wrong
+            // one.
+            far.castShadow = false;
+            scene.addChild(farNode);
+            far.object3D.frustumCulled = false;
+            far.object3D.count = 0;
+
+            this._variants.push({
+                tree: variant,
+                frame: impostorFrameSize(variant),
+                far,
+                farBucket: [],
+            });
+        }
+    }
+
+    /**
+     * Bakes each variant's impostor. Must be called once the WebGL renderer
+     * exists — the engine creates it lazily on the first frame, so the scene
+     * calls this from `ThreeSceneSystem.onRendererReady`.
+     *
+     * Until it runs, the far tier's material is `visible: false`, so distant
+     * trees are simply absent rather than drawn as untextured white rectangles.
+     */
+    bakeImpostors(renderer: THREE.WebGLRenderer): void {
+        if (this._baked) return;
+        this._baked = true;
+        const nearMaterial = this._meshes[0].material as THREE.Material;
+        for (const v of this._variants) {
+            const texture = bakeTreeImpostor(
+                renderer, v.tree, nearMaterial, cfg.trees.spriteTextureSize,
+            );
+            v.far.material = new THREE.MeshBasicMaterial({
+                map: texture,
+                // Cutout rather than blending: writes depth like opaque
+                // geometry, so hundreds of quads need no back-to-front sorting.
+                transparent: false,
+                alphaTest: 0.5,
+                fog: true,
+            });
         }
     }
 
@@ -161,15 +249,55 @@ export class ScatterStreamer {
             if (!seen.has(key)) this._byChunk.delete(key);
         }
 
+        // Sort placements into the near tier (real geometry, per variant) and the
+        // far tier (billboards, all variants together) by distance ahead.
+        const travelled = this._scroll.travelled;
+        const crossover = cfg.trees.lodCrossover;
+        // Compared squared, so the split costs no sqrt per tree.
+        const crossoverSq = crossover * crossover;
+        // Lateral reference for the viewer. The camera never strays further than
+        // the road's half-width from its centre, which is noise against a ~140m
+        // threshold, and taking it from the road keeps this out of the camera's
+        // render-space coordinates entirely.
+        const viewerX = roadCenterX(travelled);
+
         for (const bucket of this._buckets) bucket.length = 0;
+        for (const v of this._variants) v.farBucket.length = 0;
+        let near = 0, far = 0;
         for (const list of this._byChunk.values()) {
             for (const p of list) {
-                const bucket = this._buckets[p.variant];
-                if (bucket.length < cfg.trees.maxPerVariant) bucket.push(p);
+                const farBucket = this._variants[p.variant].farBucket;
+                // TRUE distance, not depth ahead. What decides whether the swap
+                // is visible is the tree's angular size, i.e. height/distance —
+                // so `lodCrossover` should mean the same thing for a tree off to
+                // the side as for one straight ahead. Depth-ahead also handed
+                // geometry to trees far out to the left and right that are
+                // outside the ~38 degree horizontal FOV entirely.
+                const dx = p.x - viewerX;
+                const dz = p.z - travelled;
+                if (dx * dx + dz * dz < crossoverSq) {
+                    const bucket = this._buckets[p.variant];
+                    if (bucket.length < cfg.trees.maxPerVariant) {
+                        bucket.push(p);
+                        near++;
+                        continue;
+                    }
+                    // Near tier full: DEMOTE to a billboard rather than drop the
+                    // tree. Dropping made `lodCrossover` non-monotone to tune —
+                    // raising it past what `maxPerVariant` holds deleted trees
+                    // instead of promoting them, so the knob got WORSE as you
+                    // turned it up. Watch `near` in the perf HUD against
+                    // maxPerVariant x variants to see if this is engaging.
+                }
+                if (farBucket.length < cfg.trees.maxFarInstances) {
+                    farBucket.push(p);
+                    far++;
+                }
             }
         }
+        this._nearCount = near;
+        this._farCount = far;
 
-        const travelled = this._scroll.travelled;
         for (let v = 0; v < this._meshes.length; v++) {
             const mesh = this._meshes[v];
             const bucket = this._buckets[v];
@@ -188,6 +316,27 @@ export class ScatterStreamer {
             // every matrix — ARCHITECTURE.md §3 item 4.
             obj.count = bucket.length;
             obj.instanceMatrix.needsUpdate = true;
+        }
+
+        // Billboards. The quad is sized to the SQUARE FRAME the impostor was
+        // baked in, not to the tree's own width and height — the bake used one
+        // square ortho frame for both axes, so using the tree's aspect here
+        // would stretch the image. Lifted by half the frame because a quad's
+        // origin is its centre while the geometry's is its base, and the bake
+        // was centred on the tree's mid-height.
+        this._quaternion.identity();
+        for (const v of this._variants) {
+            const farObj = v.far.object3D;
+            for (let i = 0; i < v.farBucket.length; i++) {
+                const p = v.farBucket[i];
+                const frame = v.frame * p.scale;
+                this._position.set(p.x, p.y + v.tree.height * 0.5 * p.scale, travelled - p.z);
+                this._scaleVec.set(frame, frame, 1);
+                this._matrix.compose(this._position, this._quaternion, this._scaleVec);
+                farObj.setMatrixAt(i, this._matrix);
+            }
+            farObj.count = v.farBucket.length;
+            farObj.instanceMatrix.needsUpdate = true;
         }
     }
 

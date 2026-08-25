@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GameEngine, createPlatform, ResolutionPolicy, RendererType } from 'noonengine';
 import { gameConfig as cfg } from './config/gameConfig';
 import { GameScene } from './scenes/GameScene';
+import { installFogCurve } from './procedural/fogCurve';
 
 /**
  * Entry point. See ARCHITECTURE.md for the design, the verified engine
@@ -11,6 +12,10 @@ import { GameScene } from './scenes/GameScene';
 // Host-platform wrapper. Never branch on `platform.name`; the one capability
 // worth branching on is `platform.isAdCreative` (a creative needs a CTA
 // button, a hosted game must not show one) — that lands in Phase 7.
+// Reshapes THREE's FogExp2 exponent. Global ShaderChunk surgery, so it has to
+// happen before any shader program is built — see procedural/fogCurve.ts.
+installFogCurve();
+
 const platform = createPlatform();
 await platform.initialize();  // must be awaited BEFORE constructing GameEngine
 

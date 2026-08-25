@@ -177,6 +177,24 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
     the third arg is the **target node** (null = fires on every event, no
     hit-test), the fourth is the callback's `this`. `off(type, cb, target)`
     takes no context and matches on callback reference.
+15. **A custom `ShaderMaterial` gets NO output colour-space conversion.**
+    three.js appends `#include <colorspace_fragment>` only inside its own
+    materials' sources. A shader that writes `gl_FragColor` itself must include
+    it, or linear values land untouched in an sRGB framebuffer and render far
+    too dark. `THREE.Color(0x…)` converts sRGB hex INTO linear working space, so
+    a uniform built from a hex literal is linear and will not survive the trip.
+    - Measured: the sky dome's horizon colour is linear `(0.3511, 0.483,
+      0.6652)`. Un-encoded it displayed as `rgb(89, 123, 170)`; the same colour
+      through `FogExp2` on a built-in material rendered `rgb(160, 185, 213)`.
+      One colour, two encodings, ~2x apparent brightness apart.
+    - Cost of not knowing this: several rounds chasing a sky/fog mismatch as a
+      gradient problem, a fog-density problem, and twice as a fake-volumetric
+      problem. A linear-space comparison even "cleared" the colours, because in
+      linear space they genuinely did match — the divergence is downstream of
+      the mix, at encoding. **Compare rendered pixels, not source colours.**
+    - Anything with a custom shader is suspect. `SkyDome` is currently the only
+      one in this project; check any new one against a built-in material showing
+      the same colour before trusting the look.
 
 ## 4. Procedural_3D_world — exactly what to take
 

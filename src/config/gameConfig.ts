@@ -807,7 +807,54 @@ export const gameConfig = {
          * (160m, 71% hidden) drops the live count by roughly half and removes
          * nothing the player can see.
          */
-        maxChunksAhead: 4,
+        /**
+         * Trees are scattered on chunks within this many ahead. Now the FULL
+         * terrain window, because past `lodCrossover` a tree is two triangles
+         * instead of ~60 — so reaching the draw edge, where fog hides 98%, costs
+         * less than stopping short at 4 chunks did with geometry all the way out.
+         *
+         * Stopping short was the actual cause of trees being visible at distance:
+         * the window ended at ~200m, where fog still leaves 14% of a tree's
+         * colour showing, so they winked out while still faintly visible.
+         */
+        maxChunksAhead: 7,
+        /**
+         * THE LOD KNOB. Distance in METRES at which a tree switches from real
+         * geometry to a baked billboard. Measured as true 3D distance from the
+         * car, so it means the same thing for a tree off to the side as for one
+         * straight ahead.
+         *
+         * Tune it by eye: the perf HUD prints `lod <m> near <n> far <n>`, so you
+         * can see both the value and how many trees each tier is holding.
+         * Raising it moves trees into geometry (better looking, more triangles
+         * in the main AND shadow passes); lowering it does the reverse. The swap
+         * is a hard switch with no cross-fade, so what you are looking for is
+         * whether you can catch a tree changing shape as you drive at it.
+         *
+         * What makes the switch invisible is fog having already removed most of
+         * the difference by the time it happens. That budget CHANGED when
+         * `world.fogFalloff` went to 4 — the curve now holds the near field much
+         * clearer, so a swap at 140m is more exposed than it used to be:
+         *
+         *   crossover   fog hides   was (exponent 2)
+         *   ---------------------------------------
+         *     100m         15%            29%
+         *     120m         28%            49%
+         *     140m         45%            62%
+         *     160m         64%            71%
+         *     180m         81%            80%
+         *     200m         92%            86%   <- current
+         *
+         * So if the pop is visible, ~170-180m is where fog starts doing the work
+         * it used to do at 140m. Watch `tris` and `near` in the HUD as you go —
+         * and check `maxPerVariant`, because the near tier demotes overflow back
+         * to billboards rather than dropping it.
+         */
+        lodCrossover: 200,
+        /** Baked impostor texture edge, pixels. */
+        spriteTextureSize: 128,
+        /** Ceiling on live billboards. Cheap enough to be generous. */
+        maxFarInstances: 700,
         /** Sunk slightly so the trunk grows out of the ground, not onto it. */
         sinkDepth: 0.25,
     },
@@ -831,27 +878,48 @@ export const gameConfig = {
         horizonSunsetColor: 0xef8f52,
         sunGlowColor: 0xfff2c8,
         /**
-         * Haze band: the bottom slice of sky is forced to exactly the fog
-         * colour, fading into the normal gradient above.
+         * The horizon-to-zenith ramp. ONE curve, deliberately — there is no
+         * separate haze band any more.
          *
-         * This is what actually makes fog HIDE things. Fog only blends a surface
-         * toward the fog colour — it cannot hide anything unless the background
-         * behind it is that same colour. Distant trees sit 2.9-6.7° above the
-         * horizon and mountains 8-18°, where the plain gradient is already
-         * 16-36% of the way to the deep blue zenith, so a 98%-fogged object was
-         * still a pale shape against a bluer sky.
+         * The band was two stages: a `pow(h, 0.55)` gradient, then an override
+         * forcing the bottom 11.5° back to the fog colour. Both halves worked,
+         * but their seam was visible. A sub-1 exponent rises FASTEST right at
+         * the horizon, which is exactly where the override was holding things
+         * flat — so the sky sat at pure fog colour to ~6°, then rushed to 41% of
+         * the way to the deep blue zenith by 11.5° where the override ended.
+         * That kink in the rate of change is what read as the horizon not
+         * matching the fog.
          *
-         * Raising the gradient exponent would also work but pales the ENTIRE
-         * visible sky (6-25° is all this camera ever sees) and loses the vivid
-         * blue. A band leaves everything above it untouched.
+         * `smoothstep` raised to a power above 1 replaces both stages with a
+         * single monotone ramp that leaves the horizon with ZERO slope, so
+         * nothing rushes and there is no boundary anywhere for the eye to catch.
+         * It also happens to dominate the old pair at every elevation the camera
+         * can see (-43°..+25° at a -8.8° pitch and 68° FOV):
          *
-         * `hazeHeight` is in sin(elevation): 0.20 ≈ 11.5°, which fully covers
-         * the trees and the base of the mountains — so ranges fade out at the
-         * bottom and stay visible at the top, which is how distant ranges
-         * actually look.
+         *   elevation      old (gradient + band)      this ramp
+         *   ----------------------------------------------------
+         *    2.9° trees          14% zenith            0.1%
+         *    6.9° treetops       ~25%                  2.3%
+         *   11.5° band edge      41%                    12%
+         *   17.5°                52%                    36%
+         *   24.8° top of frame   62%                    76%
+         *
+         * So distant geometry sits against a purer fog colour AND the top of the
+         * frame is BLUER than before — the old worry that flattening the low sky
+         * must pale the whole visible sky only applied to widening the band.
+         *
+         * Below the horizon the ramp clamps to 0, i.e. exactly the fog colour.
+         * Terrain covers everything below 0° in practice, but if a chunk seam
+         * ever shows a sliver of dome it is guaranteed to be invisible.
          */
-        hazeHeight: 0.20,
-        hazeStrength: 1,
+        /** Elevation (as sin) where the ramp reaches full zenith colour. */
+        skyTopHeight: 0.55,
+        /**
+         * How long the horizon colour is held before the ramp lifts. Above 1
+         * flattens the low sky; 1.0 is the plain smoothstep. This is the knob
+         * for "distant things are still visible" — raise it.
+         */
+        horizonHold: 1.8,
         /**
          * Clouds as camera-pinned billboards, not as shader noise.
          *
@@ -891,9 +959,15 @@ export const gameConfig = {
              */
             arcDegrees: 34,
             opacity: 0.8,
-            /** Radians per second of azimuth drift. */
-            driftSpeed: 0.012,
+            /**
+             * Radians per second of azimuth drift. ZERO on purpose: clouds this
+             * far away have no perceptible parallax against a car, so drift just
+             * reads as the sky sliding. Static also means their matrices are
+             * written once at startup instead of every frame.
+             */
+            driftSpeed: 0.01,
         },
+
         /**
          * Must ENCLOSE all world geometry (farthest terrain corner ≈ 305m) and
          * sit inside `camera.far`. Both constraints come from drawing the dome
@@ -906,25 +980,43 @@ export const gameConfig = {
 
     world: {
         /**
-         * THREE.FogExp2 density — the fraction of a surface's colour replaced
-         * by sky is 1 - exp(-(density * dist)²).
+         * Fog falloff exponent. THREE's FogExp2 is hardcoded to 2; this replaces
+         * it via a ShaderChunk patch — see `procedural/fogCurve.ts` for the full
+         * reasoning and the honest admission that it isn't physics.
          *
-         * This is a direct trade against `terrain.chunksAhead`: fog has to be
-         * thick enough at the draw edge that chunks don't pop into view, and
-         * thin enough nearer in that terrain keeps its colour. The first pass
-         * optimised only the first half — 0.010 with a 200m edge — and that is
-         * 47% fogged at 80m and 76% at 120m, which is where nearly all visible
-         * terrain sits. It washed the whole world pale and made the rock band
-         * look like it wasn't being generated at all (it was; a debug capture
-         * settled it).
+         * Short version: at exponent 2 the near field and the streaming edge are
+         * locked together and no density satisfies both. 4 delays the onset and
+         * then saturates hard, so 80m keeps 94% of its own colour while 240m
+         * keeps 0.5%. Lower this to 3 if the fog reads as a curtain at a fixed
+         * distance on a long straight; that is the failure mode to watch for.
          *
-         * 0.007 hits the near-field target — 27% hidden at 80m, 51% at 120m —
-         * so terrain keeps its colour. But then the DRAW EDGE has to move out to
-         * match it: at this density 160m only hides 86%, and that visible 14%
-         * is exactly the pop-in you get. See `terrain.chunksAhead`, which is
-         * derived from this number. Change one, re-derive the other.
+         * Changing it requires a reload — it compiles in as a shader literal.
          */
-        fogDensity: 0.007,
+        fogFalloff: 4,
+        /**
+         * THREE.FogExp2 density. With `fogFalloff`, the fraction of a surface's
+         * colour replaced by sky is 1 - exp(-(density * dist)^fogFalloff).
+         *
+         * Derived from the draw edge, which is the hard constraint: a new chunk
+         * row arrives INSTANTLY across a large area, and change detection is far
+         * more sensitive than static contrast, so anything above ~0.5% residual
+         * there reads as the world being built. 0.0063 puts 240m at exactly that
+         * — and, because of the exponent, still leaves 98% at 60m, 94% at 80m
+         * and 72% at 120m, where nearly all the terrain the player actually
+         * looks at sits.
+         *
+         * History worth not repeating: at the old exponent of 2, matching this
+         * occlusion needed 0.0096, which fogged 45% at 80m and washed the world
+         * pale enough that the rock band looked like it was never generated (it
+         * was; a debug capture settled it). The fix was the curve's shape, not
+         * its scale.
+         *
+         * Paired with `sky.horizonHold` — fog can only HIDE if the sky behind it
+         * is the fog colour. And with `terrain.chunksAhead`, which now has spare
+         * headroom: full occlusion arrives at 241m against a 280m draw edge, so
+         * that is the first place to look if chunk builds need trimming.
+         */
+        fogDensity: 0.0063,
     },
 
     /**

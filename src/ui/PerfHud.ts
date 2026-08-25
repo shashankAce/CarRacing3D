@@ -85,6 +85,9 @@ export class PerfHud {
             `FPS ${fps.toFixed(0)} frame ${meanMs.toFixed(1)} worst ${this._worstFrameMs.toFixed(1)}ms\n` +
             `build ${s.lastBuildMs.toFixed(2)} peak ${s.peakBuildMs.toFixed(2)} all ${s.allTimePeakBuildMs.toFixed(2)}\n` +
             `chunks ${s.residentChunks} q${s.pendingBuilds} ${buildsPerSec.toFixed(1)}/s trees ${this._scatter.liveCount}\n` +
+            // Near/far split and the crossover that produced it, so the LOD
+            // distance can be tuned by eye against what it actually did.
+            `lod ${cfg.trees.lodCrossover}m near ${this._scatter.nearCount} far ${this._scatter.farCount}\n` +
             `draws ${info?.calls ?? 0} tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k\n` +
             `load ${s.initialBuildMs.toFixed(0)}ms`;
 

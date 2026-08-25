@@ -29,9 +29,13 @@ import { smoothstep } from './math';
  * use THREE.Color. Per-vertex interpolation below stays plain arithmetic — the
  * allocation-free part is the hot loop, not these four constants.
  */
-// Saturated deliberately. These are seen through fog that removes 39% of the
-// colour by 100m, so a palette that looks correct up close reads as grey at
-// mid-distance — the terrain has to start more vivid than it should look.
+// Saturated deliberately: a palette that looks correct up close reads as grey at
+// mid-distance, so the terrain has to start more vivid than it should look.
+//
+// CALIBRATED AGAINST THE OLD FOG, which removed 39% of the colour by 100m.
+// `world.fogFalloff` now removes only 15% there, so this palette over-delivers —
+// if the near field reads garish rather than vivid, desaturate HERE rather than
+// thickening the fog, which is doing a different job (see fogCurve.ts).
 const GRASS_LOW = new THREE.Color(0x4d9440);
 const GRASS_HIGH = new THREE.Color(0x88c455);
 const DIRT = new THREE.Color(0x8b6a38);

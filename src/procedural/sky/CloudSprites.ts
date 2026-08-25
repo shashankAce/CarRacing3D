@@ -93,9 +93,16 @@ export class CloudSprites {
         this._writeMatrices();
     }
 
-    /** Pins the layer to the camera and drifts the clouds sideways. */
+    /**
+     * Pins the layer to the camera, and drifts it if drift is enabled.
+     *
+     * With `driftSpeed` at zero the matrices are already correct from the
+     * constructor, so this skips rewriting them — clouds at this distance have
+     * no perceptible parallax against a car, so there is nothing to recompute.
+     */
     update(dt: number, cameraPosition: THREE.Vector3): void {
         this._group.position.copy(cameraPosition);
+        if (cfg.sky.clouds.driftSpeed === 0) return;
         this._drift += dt * cfg.sky.clouds.driftSpeed;
         this._writeMatrices();
     }

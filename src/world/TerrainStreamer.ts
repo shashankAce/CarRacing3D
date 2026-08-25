@@ -159,11 +159,23 @@ export class TerrainStreamer {
     }
 
     /**
-     * The chunks that currently exist. Scattered props read this so they can
-     * never stand on ground that has been recycled out from under them.
+     * The chunks whose ground is actually BUILT and visible.
+     *
+     * `ready` is the load-bearing word. A chunk is claimed as soon as it enters
+     * the window but its geometry is filled later, one per frame, from the build
+     * queue — so the claimed set always runs ahead of the visible set by however
+     * many chunks are pending. Returning claimed-but-unbuilt chunks put trees on
+     * ground that wasn't there yet, and they hung in mid-air.
+     *
+     * That only became visible when trees started using the full terrain window:
+     * with a shorter tree window they were always well inside the built region.
      */
-    liveChunkKeys(): Iterable<number> {
-        return this._byKey.keys();
+    liveChunkKeys(): number[] {
+        const out: number[] = [];
+        for (const [key, slot] of this._byKey) {
+            if (slot.ready) out.push(key);
+        }
+        return out;
     }
 
     /**
