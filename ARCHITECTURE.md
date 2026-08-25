@@ -159,6 +159,18 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
 12. `assetCache.loadModel()` exists for FBX/GLB and **returns a fresh clone
     every call, including cache hits** — a model scene can only have one
     parent. Relevant for the later model swap; irrelevant now.
+13. **2D design space is top-left origin, Y-DOWN**
+    (`engine/lib/core/Display.js:407`) — small `y` is the top of the screen.
+    And because the policy is `FIXED_HEIGHT`, the design **width** varies with
+    the device's aspect ratio: `cfg.design.width` is the design-time value, not
+    a runtime truth. Read `inputListener.engine.display.designWidth` for the
+    live value (that's how the touch left/right split is decided), and
+    centre-anchor HUD elements — anything pinned near a left/right edge needs
+    the Widget system, which auto-trim currently strips out.
+14. A global pointer listener is `inputListener.on(type, cb, null, context)` —
+    the third arg is the **target node** (null = fires on every event, no
+    hit-test), the fourth is the callback's `this`. `off(type, cb, target)`
+    takes no context and matches on callback reference.
 
 ## 4. Procedural_3D_world — exactly what to take
 
@@ -447,3 +459,28 @@ src/
   shader comment) and `xxxxxx.io` (the engine's version banner) get flagged as
   external URLs by the static scan; neither is a network call. Re-check before
   a real submission.
+- **2026-08-25** — **Phase 1 done.** The core loop is live and the game is
+  playable: `src/world/WorldScroll.ts` (the `travelled` scalar, `renderZ()`, and
+  the `repeatingZ()` modulo wrap that Phase 2's streamer will reuse),
+  `src/game/GameState.ts` (speed ramp to cap, distance),
+  `src/game/InputController.ts` (keyboard + hold-to-steer screen halves,
+  collapsed into one -1…+1 axis sampled per frame),
+  `src/game/PlayerCar.ts` (damped lateral velocity, clamp to road edges,
+  cosmetic roll/yaw), `src/game/FollowCamera.ts` (exponential damping, easing
+  back with speed), `src/world/RoadMarkers.ts` (instanced centre dashes +
+  roadside posts — the only motion cue on a flat world), `src/ui/Hud.ts`
+  (distance, km/h, steering hint).
+  `tsc --noEmit` clean. Pack size **925.0KB / 2MB** (+7.1KB over Phase 0).
+  Auto-trim correctly picked up `InstancedMesh3D`, `Input` and `inputListener`.
+  Two more engine facts folded into §3 (items 13, 14): 2D design space is
+  Y-DOWN with a width that varies under `FIXED_HEIGHT`, and the exact shape of
+  global pointer listener registration/removal.
+  Tuned after the owner drove it: the camera was yawing on every steer because
+  its look-at target tracked the car's x — it now targets the camera's OWN x, so
+  the view axis is permanently parallel to -Z and steering is pure lateral
+  translation. Speed also felt roughly half its readout, which was the camera
+  rather than the number: `height` 6.5→4.4, `distance` 10.5→8.2, `fov` 55→68,
+  dash spacing 9→6m, post spacing 18→10m, plus `speed.start/max` 18/55→22/66 m/s.
+  Replaced the speed-based pull-back (which *reduces* the sensation) with
+  `fovSpeedGain: 8`. **Camera height and marker spacing are the two strongest
+  perceived-speed levers — reach for those before raising m/s.**
