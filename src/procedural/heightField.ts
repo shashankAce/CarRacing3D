@@ -56,28 +56,71 @@ const FLAT_MARGIN = VERTEX_SPACING * 1.5;
 const CORRIDOR_HALF_WIDTH = cfg.road.halfWidth + FLAT_MARGIN;
 
 /**
- * Rolling hills away from the road.
+ * Ridged field, 0..1, peaking sharply along ridge lines.
  *
- * PLACEHOLDER — cheap trigonometry, not noise. But it IS multi-octave, because
- * a single low-frequency octave has no local steepness: its slope is
- * amplitude × frequency, which for hills big enough to see is far too gentle to
- * ever expose the dirt and rock colour bands. The small high-frequency octave
- * is what actually creates slope, and therefore what makes the terrain read as
- * ground rather than as a tinted plane.
- *
- * Phase 6 replaces this body with the ported fbm + ridged-mountain field from
- * `Procedural_3D_world/src/terrain/ambientHeight.js`. Nothing else in this file
- * changes when it does — this function is the only seam.
+ * `1 - |field|` is the standard ridge trick: the field's zero crossings become
+ * the crests, which is what gives a mountain a sharp spine rather than a rounded
+ * top.
  */
-export function ambientHeightAt(x: number, z: number): number {
+function ridge(u: number, v: number): number {
+    const n = Math.sin(u) * Math.cos(v * 0.9) + 0.5 * Math.sin((u + v) * 1.7);
+    return 1 - Math.min(1, Math.abs(n) / 1.5);
+}
+
+/**
+ * How strongly a mountain range exists at this point, 0..1.
+ *
+ * Two masks multiplied, exactly as in P3W: a REGION mask so ranges cluster
+ * instead of covering everything, and a DISTANCE mask so they stay off the
+ * roadside. `centreX` is the road centre at this z, passed in rather than
+ * recomputed — it's already hoisted out of the chunk builder's inner loop.
+ */
+function mountainMask(x: number, z: number, centreX: number): number {
+    const m = cfg.terrain.mountains;
+    const rf = m.regionFrequency;
+    const region = octave(x * rf, z * rf) / 1.4 * 0.5 + 0.5;
+    const regionMask = smoothstep(m.threshold - m.thresholdBand, m.threshold + m.thresholdBand, region);
+    const distanceMask = smoothstep(m.distanceStart, m.distanceFull, Math.abs(x - centreX));
+    return regionMask * distanceMask;
+}
+
+/**
+ * Terrain height away from the road: rolling hills, plus mountains where the
+ * masks say so.
+ *
+ * The hills are cheap trigonometry rather than fbm, but deliberately
+ * multi-octave: a single low-frequency octave has no local steepness (its slope
+ * is amplitude × frequency, far too gentle for hills big enough to see), so the
+ * small high-frequency octave is what makes terrain read as ground rather than
+ * as a tinted plane.
+ */
+export function ambientHeightAt(x: number, z: number, centreX: number): number {
     const f = cfg.terrain.baseFrequency;
     const a = cfg.terrain.amplitude;
-    // Per-octave offsets keep the octaves from lining up their peaks at the origin.
-    return a * (
+    const m = cfg.terrain.mountains;
+
+    const mask = mountainMask(x, z, centreX);
+
+    // Hills are damped inside a mountain region so their bumps don't fight the
+    // ridge's shape — P3W does the same, for the same reason.
+    const hills = a * (
         0.55 * octave(x * f, z * f) +
         0.30 * octave(x * f * 2.4 + 11.3, z * f * 2.4 + 7.1) +
         0.15 * octave(x * f * 5.8 + 23.7, z * f * 5.8 + 17.9)
-    );
+    ) * (1 - mask * m.baseSuppression);
+
+    if (mask <= 0) return hills;
+
+    // Rotated 45° and squashed across the strike direction, so ranges elongate
+    // into chains rather than appearing as round lumps.
+    const rf = m.ridgeFrequency;
+    const rx = (x + z) * 0.7071 * rf;
+    const rz = (z - x) * 0.7071 * m.ridgeSquash * rf;
+    const r = Math.pow(ridge(rx + 40, rz + 40), m.sharpness);
+
+    // Sharp ridge detail plus a broad massif hump, so a range has bulk and
+    // doesn't fade to a field of bumps where the mask tails off.
+    return hills + mask * (r * m.amplitude + mask * m.amplitude * 0.35);
 }
 
 /**
@@ -113,7 +156,7 @@ export function heightInRow(x: number, z: number, row: HeightRow): number {
     // road level (rather than blending ambient against ambient) is what
     // guarantees flush contact at the edge.
     const t = smoothstep(0, cfg.road.shoulderWidth, distToCenter - CORRIDOR_HALF_WIDTH);
-    return lerp(row.level, ambientHeightAt(x, z), t);
+    return lerp(row.level, ambientHeightAt(x, z, row.centreX), t);
 }
 
 /** Scratch row for `heightAt`. Single-threaded and never nested, so it's safe. */

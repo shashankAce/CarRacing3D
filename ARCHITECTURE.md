@@ -468,11 +468,87 @@ ahead they sit. It costs resident memory and triangles only (54 chunks ≈ 41k
 triangles, 0.8MB of typed arrays), and the lateral column count has to grow with
 it: portrait's horizontal FOV is only ~42°, so the view is ±106m wide at 280m.
 
-### 5.9 Shadows: default OFF
-Real-time shadow maps are the most expensive thing we could switch on for the
-least gameplay value at this camera angle. Ship with a **fake blob shadow**
-(a dark, soft, unlit quad parented under each car). Keep the shadow-map path
-behind a config flag for the "high-end reskin" case.
+### 5.8a Mobile GPU budget — what three "nice" features actually cost
+
+Sky, shadows and trees were added at the owner's request and took the game from
+a locked 60fps to **17-25fps (59ms mean, 135ms worst)** on a low-end phone. The
+recovery is worth recording in full, because almost none of it was where I
+expected.
+
+Desktop mean frame time, SwiftShader (software rendering, so fragment-bound like
+a weak mobile GPU — good for RANKING fragment costs, useless for absolute ones):
+
+| step | mean | frames >20ms |
+|---|---|---|
+| as first built | 33.9 ms | 399/400 |
+| shadow map 1024→512, frustum 70→40m, posts stop casting | 22.8 ms | 289 |
+| clouds: shader noise → baked sprites | 22.5 ms | 219 |
+| **trees: bigger and fewer** | **15.3 ms** | **6** |
+| *(all three features off, for reference)* | 13.2 ms | 0 |
+
+Result on device: back to **60fps**, with full resolution intact —
+`render.pixelRatioCap` never had to be lowered, so nothing was paid in sharpness.
+
+**The A/B that mattered.** Each feature was measured by disabling it alone:
+clouds 7.7ms, shadows 8.9ms, trees 7.9ms. Roughly equal thirds — so there was no
+single culprit to fix, and any one fix alone would have looked like failure.
+Measure all of them before concluding anything.
+
+**"Bigger and fewer" beat every micro-optimisation** *(the owner's suggestion)*.
+Raising tree size and thinning the count to hold canopy coverage constant was
+sized to save ~2× on triangles; it saved **7ms**, over half the remaining
+regression. So tree COUNT was costing far more than its triangles: per-instance
+matrix writes, and every tree rasterised a second time into the shadow map.
+Count is expensive, size is nearly free. Apply this to rocks and any future
+scatter before tuning anything else.
+
+**Per-pixel procedural detail is the wrong shape for a mobile playable.** The
+sky's noise clouds cost 7.7ms because every pixel of the upper sky paid for ~16
+evaluations of 3D simplex whether a cloud was there or not. Two wrong turns
+before the right one: cheapening the noise (broke the look — a raw noise value
+compared against a processed density gives dark blotches), then a baked
+cloud-plane texture (still a fetch across the whole sky). Billboards pay only
+for the pixels a cloud covers. The gradient-and-glow dome, measured separately,
+is very nearly free — it was never the problem.
+
+**The fixed camera is an exploitable constraint.** Because the camera never yaws
+or re-pitches, the visible sky is a permanent window: elevation 6-25°, azimuth
+±21°. Cloud quads therefore need no billboarding (a quad facing +Z always faces
+this camera), can be one instanced draw per texture, and only need to exist in
+the forward arc. A first attempt scattered them over the full celestial sphere
+and rendered an empty sky — ~1.6 of 14 inside the horizontal cone, none inside
+the elevation band.
+
+**Draw order for a sky that isn't wasteful.** Draw the dome LAST with depth
+testing and no depth write, so only pixels with no geometry in front of them
+shade. The usual skybox trick (draw first) pays full fragment cost for the ~60%
+of the screen that terrain then paints over. The price is that the dome must
+ENCLOSE all geometry — hence `sky.domeRadius` 350 against a farthest terrain
+corner of 305m, and `camera.far` 400 to contain it.
+
+### 5.9 Shadows: affordable, but only just
+This section previously said to ship a fake blob shadow and keep real shadows
+behind a flag. Real shadows are in, and they do work on a low-end phone — but
+only after being cut hard, and they remain the largest of the three costs above.
+What made them viable:
+
+- **512 map, not 1024** (quarters the depth pass's fill), with the orthographic
+  frustum halved 70→40m alongside it so texel density — and therefore edge
+  quality — stays roughly where it was.
+- **The frustum follows the car.** A directional light's shadow map covers only
+  the box its camera sees, so a fixed light drops shadows entirely a few tens of
+  metres into an infinite run. The target leads the car slightly, since the road
+  ahead is what the player is looking at.
+- **Ruthless caster selection.** Car body and cabin, traffic, and trees cast.
+  Wheels don't (inside the body's own shadow at any sun angle that isn't
+  near-horizontal). Roadside posts don't — "one instanced draw, nearly free" was
+  wrong: it's 64 more boxes rasterised into the map every frame for thin slivers
+  on the verge. Terrain receives but never casts; hills shadowing each other is
+  a second pass over the heaviest geometry in the scene for something fog hides
+  at any distance where it would be visible.
+
+`lighting.shadows.enabled` is still the switch to reach for first if a reskin
+targets weaker hardware.
 
 ## 6. Decisions
 
@@ -483,7 +559,8 @@ not assumptions to revisit.
 |---|---|---|
 | D1 | Which ad target is the 2MB from? | **`meta-playables`** — 2MB raw single HTML, no network requests. Everything here is built to its rules, which satisfies every other network too. |
 | D2 | Discrete lane snapping vs free lateral steering? | **Free lateral steering** with clamping to the road edges, plus a visual roll on the car. Traffic still spawns on lane centres. |
-| D3 | How rich are the trees? | **Port, then measure.** Start with P3W's generator at its cheap `ringDetail: 0.4` tier and a **3-variant** pool, and measure both boot-time generation cost and frame cost. If either is material, fall back to a simple cone/sphere tree — at this camera distance the full skeleton may be invisible detail we're paying full price for. |
+| D3 | How rich are the trees? | **RESOLVED 2026-08-26: fallback taken.** P3W's generator measures **38,900 triangles and 2.9MB per tree** (its own cheap `ringDetail: 0.4` tier only reaches 38,216 — that thins branch rings, and the triangles are in the foliage). The whole scene runs ~40k triangles. Low-poly geometry is used instead, ~60 triangles a tree; everything else from P3W (scatter, instancing, vertex colour, proportions) is kept. Original plan below. |
+| D3-orig | *(superseded)* | **Port, then measure.** Start with P3W's generator at its cheap `ringDetail: 0.4` tier and a **3-variant** pool, and measure both boot-time generation cost and frame cost. If either is material, fall back to a simple cone/sphere tree — at this camera distance the full skeleton may be invisible detail we're paying full price for. |
 | D4 | Portrait 720×1280? | **Yes** — matches the existing scaffold and `pack:google-playables --orientation=portrait`. |
 | D5 | Does the car follow a curving road on its own? | **No.** Settled 2026-08-25 after trying both. The car's lateral position is ABSOLUTE and only steering moves it; the clamp to the asphalt is what tracks the curve. So holding a bend takes input, and reaching an edge is a collision that shoves the car along it. Storing the car's position as an offset from the road centre was tried and rejected — it carried the car through bends with no input, making the curve decoration. |
 | D7 | Is speed automatic or player-controlled? | **Player-controlled** (Phase 5). Gas/brake, with a floor at `speed.min` deliberately set ABOVE the fastest traffic so vehicles can never overtake from behind and hit the player from a direction they cannot see. |
@@ -725,3 +802,33 @@ src/
   Verified in a browser: gas measured 24 → 45 m/s over 3s at 7 m/s² (`163 km/h`,
   matching the arithmetic exactly), press highlighting works, cuts still score,
   crash and restart still work. `tsc --noEmit` clean.
+- **2026-08-26** — **Phase 6, part one: sky, sun, shadows, trees, mountains.**
+  Rocks and LOD not done.
+  New: `procedural/sky/SkyDome.ts` (P3W's dome shader, reduced to gradient + sun
+  glow), `procedural/sky/CloudSprites.ts` + `cloudTexture.ts` (CPU-baked puffs on
+  instanced quads in the forward arc), `procedural/tree.ts` (low-poly conifer,
+  ~60 triangles), `procedural/mergeGeometry.ts` (hand-rolled, so
+  `BufferGeometryUtils` stays out of the bundle — an InstancedMesh draws ONE
+  geometry, so an unmerged tree cannot be instanced at all),
+  `procedural/random.ts`, `world/ScatterStreamer.ts` (per-chunk deterministic
+  placement, ported rejection rules, instanced per variant).
+  `lighting.sunDirection` is now the single source of truth for the light, the
+  sky's glow and horizon warmth, and the shadow frustum's aim. Scene fog and
+  background are DERIVED from the dome's effective horizon — the shader warms it
+  by sun height, so a hand-matched fog colour agrees at exactly one sun elevation
+  and seams at every other.
+  Mountains added to `ambientHeightAt` on the owner's suggestion ("increase the
+  terrain height that looks like rock, but not for all"), structurally ported
+  from P3W: region mask for where, distance mask to keep ranges off the verge,
+  ridged field on a rotated squashed domain for elongated chains, massif hump for
+  bulk, hill octaves damped inside regions. Rock colour now also triggers by
+  ALTITUDE, since a mountain's broad gentle flanks stayed green on slope alone.
+  Two things taller terrain broke, both caught: the chunk bounding sphere was
+  sized for ±11m of hills against ~40m mountains, and would have culled chunks at
+  the edge of frame.
+  Perf: 59ms → 60fps on device. Full write-up in §5.8a; §5.9 rewritten now that
+  real shadows have shipped. `tsc --noEmit` clean. Pack **956.6KB / 2MB**, one
+  file, passing.
+  Process note: I spent several turns reporting pack size from a grep of the
+  `Total:` line while the pack was in fact FAILING (an unembeddable `.rar` in
+  `res/`, over the 1-file limit). Read the whole pack output.

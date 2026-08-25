@@ -106,8 +106,12 @@ export class TerrainStreamer {
         // Overestimating only costs a little missed culling; underestimating
         // makes chunks vanish at the edge of frame.
         const size = t.chunkSize;
+        // Must cover the tallest thing a chunk can contain. Mountains reach
+        // `amplitude * 1.35` above the hills (ridge plus massif hump), and an
+        // undersized sphere makes whole chunks vanish at the edge of frame.
         const radius = Math.hypot(size, size) * 0.5 + t.skirtDepth
-            + t.amplitude * 2 + Math.abs(cfg.road.slopeAmplitude);
+            + t.amplitude * 2 + Math.abs(cfg.road.slopeAmplitude)
+            + t.mountains.amplitude * 1.4;
         const boundingSphere = new THREE.Sphere(new THREE.Vector3(size / 2, 0, -size / 2), radius);
 
         for (let i = 0; i < slotCount; i++) {
@@ -126,6 +130,10 @@ export class TerrainStreamer {
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.visible = false;
+            // Receives but does not cast: hills shadowing each other is a second
+            // pass over the heaviest geometry in the scene for an effect the fog
+            // hides at any distance where it would be visible.
+            mesh.receiveShadow = cfg.lighting.shadows.enabled;
             scene.add(mesh);
 
             this._slots.push({ mesh, positions, normals, uvs, colors, cx: 0, cz: 0, inUse: false, ready: false });
@@ -138,6 +146,24 @@ export class TerrainStreamer {
         // into the low bits keeps the key a small integer (fast Map hashing)
         // without ever colliding.
         return cz * 64 + (cx + 32);
+    }
+
+    /**
+     * Inverse of `_key`. The double-modulo is not decoration: JS `%` keeps the
+     * sign of the dividend, so `-99 % 64` is -35 and a chunk behind the origin
+     * would decode to the wrong column.
+     */
+    static decodeKey(key: number): { cx: number; cz: number } {
+        const low = ((key % 64) + 64) % 64;
+        return { cx: low - 32, cz: (key - low) / 64 };
+    }
+
+    /**
+     * The chunks that currently exist. Scattered props read this so they can
+     * never stand on ground that has been recycled out from under them.
+     */
+    liveChunkKeys(): Iterable<number> {
+        return this._byKey.keys();
     }
 
     /**

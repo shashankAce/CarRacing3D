@@ -51,6 +51,11 @@ export class RoadMarkers {
             p.color,
             p.count * 2,
         );
+        // Posts deliberately do NOT cast. "One instanced draw, so nearly free"
+        // was wrong: it's 64 more boxes rasterised into the shadow map every
+        // frame, and their shadows are thin slivers on the verge that nobody
+        // looks at. The dashes lie flat on the asphalt and would only ever
+        // shadow themselves.
 
         this.update();
     }

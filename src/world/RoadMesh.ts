@@ -108,6 +108,9 @@ export class RoadMesh {
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.visible = false;
+            // The asphalt is where the car's and traffic's shadows land, so this
+            // is the one receiver that really matters.
+            mesh.receiveShadow = cfg.lighting.shadows.enabled;
             scene.add(mesh);
             this._slots.push({ mesh, positions, bi: 0, inUse: false });
         }

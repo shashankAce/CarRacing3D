@@ -67,6 +67,9 @@ export class TrafficSystem {
             const mesh = node.addComponent(Mesh3D);
             mesh.geometry = geometry;
             mesh.material = materials[0];
+            // `castShadow` IS schema-exposed on the wrapper, unlike the shadow
+            // camera settings.
+            mesh.castShadow = cfg.lighting.shadows.enabled;
             scene.addChild(node);
             mesh.object3D.visible = false;
             this._pool.push({

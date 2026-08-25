@@ -1,6 +1,7 @@
 import { Node, Label, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { TerrainStreamer } from '../world/TerrainStreamer';
+import type { ScatterStreamer } from '../world/ScatterStreamer';
 
 /**
  * PerfHud — on-screen performance counters, for reading real numbers off a real
@@ -32,6 +33,7 @@ export class PerfHud {
 
     private _label: Label;
     private _streamer: TerrainStreamer;
+    private _scatter: ScatterStreamer;
     /** Lazily resolved — the THREE renderer doesn't exist until the first frame. */
     private _sys: { renderer: { info: { render: { calls: number; triangles: number } } } | null };
 
@@ -41,8 +43,9 @@ export class PerfHud {
     private _sinceRepaint = 0;
     private _lastBuildCount = 0;
 
-    constructor(scene: Scene, streamer: TerrainStreamer, sys: any) {
+    constructor(scene: Scene, streamer: TerrainStreamer, scatter: ScatterStreamer, sys: any) {
         this._streamer = streamer;
+        this._scatter = scatter;
         this._sys = sys;
 
         const node = new Node(cfg.design.width / 2, cfg.hud.perfY);
@@ -81,7 +84,7 @@ export class PerfHud {
         this._label.text =
             `FPS ${fps.toFixed(0)} frame ${meanMs.toFixed(1)} worst ${this._worstFrameMs.toFixed(1)}ms\n` +
             `build ${s.lastBuildMs.toFixed(2)} peak ${s.peakBuildMs.toFixed(2)} all ${s.allTimePeakBuildMs.toFixed(2)}\n` +
-            `chunks ${s.residentChunks} queue ${s.pendingBuilds} ${buildsPerSec.toFixed(1)}/s\n` +
+            `chunks ${s.residentChunks} q${s.pendingBuilds} ${buildsPerSec.toFixed(1)}/s trees ${this._scatter.liveCount}\n` +
             `draws ${info?.calls ?? 0} tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k\n` +
             `load ${s.initialBuildMs.toFixed(0)}ms`;
 

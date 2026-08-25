@@ -31,9 +31,11 @@ export const gameConfig = {
      * palette swap changes the whole biome with zero geometry change.
      */
     colors: {
-        sky: 0x9ad1e5,
-        /** Match `fog` to `sky` or the far plane reads as a hard edge. */
-        fog: 0x9ad1e5,
+        // NOTE: there is no `sky` or `fog` colour here on purpose. Both are
+        // DERIVED from the sky dome's own horizon, which the shader warms toward
+        // `sky.horizonSunsetColor` as the sun drops — so a hand-set fog colour
+        // matches only at one sun angle and shows a seam at every other. See
+        // `SkyDome.effectiveHorizonColor`.
         ground: 0x6a9b57,
         road: 0x3c3c44,
         roadLine: 0xe8e4cf,
@@ -153,6 +155,51 @@ export const gameConfig = {
         baseFrequency: 0.045,
 
         /**
+         * Mountains — a selective, much larger height term on top of the hills.
+         *
+         * Structure ported from `Procedural_3D_world/src/terrain/ambientHeight.js`:
+         * a low-frequency REGION mask decides where a range exists at all, a
+         * DISTANCE mask keeps ranges off the roadside, and the shape is a ridged
+         * field sampled on a rotated, anisotropically squashed domain so peaks
+         * read as elongated chains instead of a field of isotropic bumps. The
+         * height is a broad massif hump plus sharp ridge detail on top — without
+         * the hump, ridge noise alone fades to bumps at the mask edges instead of
+         * a mountain with a base.
+         *
+         * The steep faces this produces are what trip the rock colour band, which
+         * gentle hills never reach — so this is also what makes rock read as rock.
+         */
+        mountains: {
+            /** Peak height above the hills, metres. */
+            amplitude: 30,
+            /** Region mask: low frequency, thresholded. Wavelength ~1800m. */
+            regionFrequency: 0.0035,
+            threshold: 0.5,
+            /** Half-width of the smoothstep either side of `threshold`. */
+            thresholdBand: 0.18,
+            /** Ridge detail frequency. Wavelength ~630m. */
+            ridgeFrequency: 0.010,
+            /** How much a range is squashed across its own strike direction. */
+            ridgeSquash: 1.65,
+            /** Exponent on the ridge — higher is sharper peaks, deeper gullies. */
+            sharpness: 2.2,
+            /**
+             * Mountains start rising this far from the road centre and reach full
+             * height by the second value. Must comfortably exceed the flattened
+             * corridor plus shoulder (~18m) or a range becomes a wall at the
+             * verge; but the view frustum is only ±21°, so pushing them too far
+             * out means they're only ever seen deep in the fog.
+             */
+            distanceStart: 38,
+            distanceFull: 105,
+            /**
+             * How much the small hill octaves are damped inside a mountain
+             * region, so their bumps don't fight the ridge's own shape.
+             */
+            baseSuppression: 0.65,
+        },
+
+        /**
          * Where grass gives way to dirt and then to bare rock, in units of
          * terrain SLOPE (rise over run) rather than normal components — 0 is
          * dead flat, 1 is a 45° face. Converted to normal thresholds once at
@@ -204,6 +251,14 @@ export const gameConfig = {
          */
         rockSlopeStart: 0.25,
         rockSlopeFull: 0.45,
+        /**
+         * Rock also takes over by ALTITUDE, regardless of slope. Slope alone is
+         * enough for hills, but a mountain has broad gentle flanks high up that
+         * would otherwise be bright grass — a green mountain reads wrong, and the
+         * point of raising the terrain was to get rock.
+         */
+        rockAltitudeStart: 12,
+        rockAltitudeFull: 30,
     },
 
     /**
@@ -464,8 +519,8 @@ export const gameConfig = {
          * longest line here is ~34 monospace characters.
          */
         perfFontSize: 24,
-        /** Dark, because it's read against sky and against green hills. */
-        perfColor: '#0d2b33',
+        /** Light: the top of the frame is the dome's deep-blue zenith. */
+        perfColor: '#bfe8c9',
         /**
          * Seconds per sample window. Also the repaint interval. Has to be long
          * enough that the build RATE is meaningful: chunks arrive in rows of 6
@@ -497,7 +552,7 @@ export const gameConfig = {
         /** Cars cut — the skill readout, so it sits with the distance. */
         cutsY: 1088,
         cutsFontSize: 30,
-        cutsColor: '#8a5c10',
+        cutsColor: '#ffd98a',
         /**
          * Fuel gauge, drawn as block glyphs in a monospace label. A real bar
          * would need a ColorRect and the `graphics` system, which auto-trim
@@ -506,8 +561,8 @@ export const gameConfig = {
          */
         fuelY: 1035,
         fuelFontSize: 28,
-        fuelColor: '#1d6b32',
-        fuelWarnColor: '#b3301a',
+        fuelColor: '#8de89b',
+        fuelWarnColor: '#ff7a5c',
         fuelCells: 14,
         /** Game-over panel. */
         gameOverY: 760,
@@ -524,7 +579,7 @@ export const gameConfig = {
         distanceFontSize: 62,
         speedFontSize: 34,
         hintFontSize: 26,
-        textColor: '#123a47',
+        textColor: '#f4f9fb',
         hintColor: '#c9d9e2',
         hintText: '◀ ▶ STEER    ▲ GAS    ▼ BRAKE',
     },
@@ -573,8 +628,16 @@ export const gameConfig = {
      */
     camera: {
         fov: 68,
-        near: 0.5,
-        far: 260,
+        /**
+         * `far` must exceed `sky.domeRadius`, which must in turn exceed the
+         * farthest terrain corner (305m at the current chunk window) — the dome
+         * is drawn LAST and depth-tested so it only shades visible sky, and that
+         * only works if it sits behind everything. `near` is raised off 0.5 to
+         * claw back depth precision over the longer range; the camera is 8.2m
+         * behind the car, so 1m clips nothing.
+         */
+        near: 1,
+        far: 400,
         /** Offset from the car, in the car's own space. +Z is behind. */
         height: 4.4,
         distance: 8.2,
@@ -588,13 +651,187 @@ export const gameConfig = {
         fovSpeedGain: 8,
     },
 
+    /**
+     * Lighting. `sunDirection` points TOWARD the sun and is the single source of
+     * truth for it: the directional light is placed along it, the sky dome's glow
+     * and horizon warmth are driven by it, and the shadow frustum is aimed down
+     * it. Change it in one place and everything agrees.
+     */
     lighting: {
         ambientColor: 0x9fb8c8,
-        ambientIntensity: 1.5,
+        ambientIntensity: 1.35,
         sunColor: 0xfff2dd,
-        sunIntensity: 2.2,
-        /** Sun direction, as a position offset from the origin. */
-        sunPosition: { x: 30, y: 60, z: 25 },
+        sunIntensity: 2.4,
+        /**
+         * Unit-ish; normalised on use. Behind and to the right of the camera.
+         *
+         * `y` is the mood dial: the sky shader mixes the horizon toward
+         * `sky.horizonSunsetColor` by (1 - y), so 0.66 read as dusk — pink haze
+         * under a purple zenith. 0.78 keeps the sun low enough for long, legible
+         * shadows without the whole scene going evening.
+         */
+        sunDirection: { x: 0.38, y: 0.78, z: 0.5 },
+        /** How far along `sunDirection` the light is placed, metres. */
+        sunDistance: 90,
+        /**
+         * Real-time shadow maps. The most expensive thing in the renderer for
+         * the least gameplay value at this camera angle, so this is a deliberate
+         * on/off knob rather than something assumed.
+         *
+         * `frustumRadius` is the half-extent of the orthographic shadow camera.
+         * It has to cover the ground the player can actually see shadows on —
+         * too large and the map's texels stretch until shadows go blocky, too
+         * small and shadows pop in a few metres ahead of the car. The camera
+         * FOLLOWS the car, so this bounds the near field, not the draw distance.
+         */
+        shadows: {
+            enabled: false,
+            /**
+             * 512, not 1024. Measured at ~8.9ms a frame on a low-end phone at
+             * 1024 with a 70m frustum — a third of a 42ms regression. Halving
+             * the map quarters the fill of the depth pass, and halving the
+             * frustum with it keeps texel density (and therefore edge quality)
+             * roughly where it was.
+             */
+            mapSize: 512,
+            frustumRadius: 40,
+            near: 1,
+            far: 260,
+            /** Peter-panning vs acne. normalBias is the safer of the two dials. */
+            bias: -0.0005,
+            normalBias: 0.6,
+        },
+    },
+
+    /**
+     * Trees. Geometry is low-poly on purpose — see the measurement note at the
+     * top of `src/procedural/tree.ts` for why Procedural_3D_world's generator
+     * isn't used.
+     *
+     * `spacing` is the dominant cost dial: candidate count scales with its
+     * inverse square, and every survivor is a matrix write per frame plus its
+     * triangles in both the main and the shadow pass.
+     */
+    trees: {
+        /** Distinct geometries generated at boot and instanced. */
+        variants: 4,
+        /**
+         * Bigger and fewer. Canopy area goes as the square of the radius, so
+         * raising the size and thinning the count keeps the same amount of
+         * foliage on screen for far less geometry: at spacing 18 with these
+         * heights the covered ground area is ~2100m² against ~1650m² at the
+         * previous 12/5.5-9.5, from roughly HALF the trees — so ~3.7k triangles
+         * instead of ~8.3k, in both the main and the shadow pass.
+         */
+        heightMin: 8,
+        heightMax: 14,
+        trunkRadiusK: 0.035,
+        canopyRadiusK: 0.30,
+        tiersMin: 2,
+        tiersMax: 4,
+        trunkSegments: 5,
+        canopySegments: 6,
+        trunkColor: 0x51402c,
+        foliageLowColor: 0x2f4a2e,
+        foliageHighColor: 0x5f8a45,
+
+        /** Average metres between placement candidates, before rejection. */
+        spacing: 18,
+        /** Candidates on ground steeper than this are rejected. */
+        maxSlope: 0.55,
+        /**
+         * Clearance from the road centre. Must exceed the flattened corridor, or
+         * trees grow out of the verge and the player clips scenery that looks
+         * like it's beside the road rather than on it.
+         */
+        roadClearance: 15,
+        /**
+         * Density mask: candidates whose noise value falls below this are
+         * dropped, which is what produces clumps and clearings instead of an
+         * even sprinkle. 0 keeps everything.
+         */
+        densityCutoff: 0.42,
+        densityFrequency: 0.012,
+        /** Ceiling on live instances per variant. */
+        maxPerVariant: 120,
+        /**
+         * Trees are only scattered on chunks within this many ahead of the car,
+         * even though terrain streams further.
+         *
+         * The terrain window reaches 7 chunks (280m), where fog hides 98% of a
+         * surface's colour — trees out there cost triangles in the main pass AND
+         * the shadow pass to render an invisible smudge. Cutting to 4 chunks
+         * (160m, 71% hidden) drops the live count by roughly half and removes
+         * nothing the player can see.
+         */
+        maxChunksAhead: 4,
+        /** Sunk slightly so the trunk grows out of the ground, not onto it. */
+        sinkDepth: 0.25,
+    },
+
+    /**
+     * Procedural sky dome — a gradient, a sun glow and drifting noise clouds,
+     * all evaluated per-pixel. One draw call, no textures, which is why it fits
+     * a 2MB budget where a cubemap would cost hundreds of kilobytes.
+     *
+     * `horizonColor` MUST match `colors.fog`, or distant terrain fades into one
+     * colour while the sky behind it is another and the horizon shows a seam.
+     */
+    sky: {
+        zenithColor: 0x2f6fd6,
+        horizonColor: 0xc9dcef,
+        horizonSunsetColor: 0xf2955c,
+        sunGlowColor: 0xfff2c8,
+        /**
+         * Clouds as camera-pinned billboards, not as shader noise.
+         *
+         * The first version computed a 3D noise field per pixel in the sky
+         * shader: ~16 evaluations of 3D simplex per cloud pixel, measured at
+         * 7.7ms a frame (≈14ms on a low-end phone). The cost was structural —
+         * every pixel of the upper sky paid it whether a cloud was there or not.
+         * Sprites pay only for the pixels they cover, and one texture fetch.
+         *
+         * The puff textures are generated on the CPU at boot, so they cost no
+         * bundle bytes and can afford more octaves than realtime ever could.
+         */
+        clouds: {
+            /** Billboards on the sky. Each is one quad. */
+            count: 14,
+            /** Distinct puff textures, shared across the sprites. */
+            variants: 3,
+            textureSize: 128,
+            seed: 20260826,
+            /** Distance from the camera. Inside `domeRadius` so they sit in front of it. */
+            radius: 300,
+            /** World-space width; height is a random fraction of it. */
+            sizeMin: 90,
+            sizeMax: 190,
+            /**
+             * Elevation band, degrees. Derived from what the camera can actually
+             * see: at a fixed -8.8° pitch and a 68° vertical FOV, visible
+             * elevation is -43°..+25°, so clouds above ~25° are never in frame.
+             * A first pass used 14..46° and produced an empty sky.
+             */
+            minElevation: 6,
+            maxElevation: 24,
+            /**
+             * Half-width of the arc clouds occupy, degrees, measured around
+             * forward. The horizontal FOV is only ~42° (±21°), so this is that
+             * plus margin either side, letting clouds drift in rather than pop.
+             */
+            arcDegrees: 34,
+            opacity: 0.8,
+            /** Radians per second of azimuth drift. */
+            driftSpeed: 0.012,
+        },
+        /**
+         * Must ENCLOSE all world geometry (farthest terrain corner ≈ 305m) and
+         * sit inside `camera.far`. Both constraints come from drawing the dome
+         * last with depth testing on, which is what stops it shading pixels that
+         * terrain covers — 4 fbm evaluations a pixel is far too much to spend on
+         * fragments that get painted over.
+         */
+        domeRadius: 350,
     },
 
     world: {

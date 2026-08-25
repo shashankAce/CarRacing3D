@@ -20,6 +20,9 @@ export class FollowCamera {
     private _lookAt = new THREE.Vector3();
     private _desired = new THREE.Vector3();
 
+    /** The live camera position — the sky dome re-centres on it each frame. */
+    get position(): THREE.Vector3 { return this._camera.position; }
+
     constructor(scene: Scene) {
         const node = new Node();
         this._camera = node.addComponent(Camera3D);

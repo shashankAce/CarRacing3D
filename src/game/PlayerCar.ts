@@ -87,6 +87,8 @@ export class PlayerCar {
         // Biased toward the rear (+Z) so the silhouette reads as facing -Z.
         cabin.position.set(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
 
+        body.castShadow = cfg.lighting.shadows.enabled;
+        cabin.castShadow = cfg.lighting.shadows.enabled;
         this._group.object3D.add(body, cabin);
         this._buildWheels();
         this.reset();
@@ -123,6 +125,10 @@ export class PlayerCar {
         for (const sx of [-1, 1]) {
             for (const sz of [-1, 1]) {
                 const wheel = new THREE.Mesh(geometry, material);
+                // Wheels deliberately don't cast — they're inside the body's own
+                // shadow from any sun angle that isn't near-horizontal, so it's
+                // four more casters for nothing.
+                wheel.castShadow = false;
                 // Axle at exactly `radius` puts the tread on the ground plane,
                 // which is the plane the group's origin sits on.
                 wheel.position.set(sx * x, w.radius, sz * z);

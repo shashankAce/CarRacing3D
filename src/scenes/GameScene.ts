@@ -9,11 +9,14 @@ import { PlayerCar } from '../game/PlayerCar';
 import { FollowCamera } from '../game/FollowCamera';
 import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
+import { ScatterStreamer } from '../world/ScatterStreamer';
 import { RoadMesh } from '../world/RoadMesh';
 import { TouchControls } from '../ui/TouchControls';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
+import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
+import { CloudSprites } from '../procedural/sky/CloudSprites';
 
 /**
  * GameScene — Phase 5: player throttle and fuel.
@@ -44,10 +47,14 @@ export class GameScene extends Scene {
     private _markers: RoadMarkers;
     private _terrain: TerrainStreamer;
     private _road: RoadMesh;
+    private _scatter: ScatterStreamer;
     private _traffic: TrafficSystem;
     private _hud: Hud;
     private _gameOver: GameOverPanel;
     private _perf: PerfHud | null = null;
+    private _sun: DirectionalLight3D;
+    private _sky: SkyDome;
+    private _clouds: CloudSprites;
 
     onLoad(): void {
         // Idempotent — the engine config already ran this, but calling it here
@@ -55,15 +62,26 @@ export class GameScene extends Scene {
         this._initThree(THREE);
         const sys = this.threeSceneSystem;
 
-        sys.scene.background = new THREE.Color(cfg.colors.sky);
+        // Both derived from the dome's own horizon, so distant terrain fades
+        // into exactly the colour the sky shows behind it at any sun angle.
+        const horizon = effectiveHorizonColor();
+        sys.scene.background = horizon;
         // No wrapper for fog by design — it has no lifecycle to manage.
-        sys.scene.fog = new THREE.FogExp2(cfg.colors.fog, cfg.world.fogDensity);
+        sys.scene.fog = new THREE.FogExp2(horizon.getHex(), cfg.world.fogDensity);
 
         // The renderer is created lazily on the first frame, so this callback
         // is the only correct place to configure it.
         sys.onRendererReady = (renderer) => {
-            renderer.shadowMap.enabled = cfg.render.shadows;
+            renderer.shadowMap.enabled = cfg.lighting.shadows.enabled;
+            // Basic PCF rather than PCFSoft: soft shadows cost noticeably more
+            // fill on a low-end phone, and at this camera distance the extra
+            // edge quality is close to invisible. Swap if a reskin targets
+            // better hardware.
+            renderer.shadowMap.type = THREE.PCFShadowMap;
         };
+
+        this._sky = new SkyDome(sys.scene);
+        this._clouds = new CloudSprites(sys.scene);
 
         this._buildLights();
 
@@ -84,14 +102,16 @@ export class GameScene extends Scene {
         // The player must never watch the world assemble itself, so the opening
         // window is built in full before the first frame rather than one chunk
         // at a time.
+        this._scatter = new ScatterStreamer(this, this._state.scroll);
         this._terrain.buildAllNow();
         this._road.update();
+        this._syncScatter();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
         this._hud = new Hud(this);
         this._gameOver = new GameOverPanel(this);
-        if (cfg.debug.showPerf) this._perf = new PerfHud(this, this._terrain, sys);
+        if (cfg.debug.showPerf) this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
     }
 
     private _buildLights(): void {
@@ -106,9 +126,53 @@ export class GameScene extends Scene {
         sun.color = cfg.lighting.sunColor;
         sun.intensity = cfg.lighting.sunIntensity;
         this.addChild(sunNode);
-        const p = cfg.lighting.sunPosition;
-        sun.position.set(p.x, p.y, p.z);
-        sun.target.position.set(0, 0, 0);
+        this._sun = sun;
+
+        const sh = cfg.lighting.shadows;
+        if (sh.enabled) {
+            // Shadow config isn't schema-exposed on the wrapper — this is the
+            // documented raw-THREE escape hatch.
+            const light = sun.light;
+            light.castShadow = true;
+            light.shadow.mapSize.set(sh.mapSize, sh.mapSize);
+            // A directional light's shadow camera is orthographic; these bounds
+            // are what the map's texels are spread across.
+            const cam = light.shadow.camera;
+            cam.left = -sh.frustumRadius;
+            cam.right = sh.frustumRadius;
+            cam.top = sh.frustumRadius;
+            cam.bottom = -sh.frustumRadius;
+            cam.near = sh.near;
+            cam.far = sh.far;
+            cam.updateProjectionMatrix();
+            light.shadow.bias = sh.bias;
+            light.shadow.normalBias = sh.normalBias;
+        }
+        this._updateSun();
+    }
+
+    /**
+     * Keeps the sun — and therefore the shadow frustum — over the car.
+     *
+     * A directional light's shadow map covers only the box its orthographic
+     * camera sees, so a fixed light would drop shadows entirely a few tens of
+     * metres into an infinite run. The target leads the car slightly, since the
+     * road ahead is what the player is looking at.
+     */
+    private _updateSun(): void {
+        const d = cfg.lighting.sunDirection;
+        const len = Math.hypot(d.x, d.y, d.z) || 1;
+        const dist = cfg.lighting.sunDistance;
+        const carX = this._car ? this._car.position.x : 0;
+        const carY = this._car ? this._car.position.y : 0;
+        const focusZ = -cfg.lighting.shadows.frustumRadius * 0.4;
+
+        this._sun.target.position.set(carX, carY, focusZ);
+        this._sun.position.set(
+            carX + (d.x / len) * dist,
+            carY + (d.y / len) * dist,
+            focusZ + (d.z / len) * dist,
+        );
     }
 
     /**
@@ -138,6 +202,7 @@ export class GameScene extends Scene {
             // so nothing is ever a frame behind what the player is looking at.
             this._terrain.update();
             this._road.update();
+            this._syncScatter();
             this._markers.update();
         } else if (this._input.consumeTap()) {
             this._restart();
@@ -146,8 +211,20 @@ export class GameScene extends Scene {
         // The camera keeps easing after a crash — it settles rather than
         // freezing mid-motion, which reads far better than a hard stop.
         this._camera.update(dt, this._car, this._state.speedT);
+        this._updateSun();
+        this._sky.update(this._camera.position);
+        this._clouds.update(dt, this._camera.position);
         this._hud.update(this._state, this._input.hasSteered, this._traffic.cuts);
         this._perf?.update(dt);
+    }
+
+    /**
+     * Trees follow the terrain's live chunk set rather than keeping their own
+     * window, so a tree can never be left standing on ground that's been
+     * recycled.
+     */
+    private _syncScatter(): void {
+        this._scatter.update(this._terrain.liveChunkKeys(), TerrainStreamer.decodeKey);
     }
 
     private _endRun(title: string): void {
@@ -174,6 +251,8 @@ export class GameScene extends Scene {
         // so the player never sees the opening chunks stream in.
         this._terrain.buildAllNow();
         this._road.update();
+        this._scatter.reset();
+        this._syncScatter();
         this._markers.update();
         this._camera.snapTo(this._car);
     }

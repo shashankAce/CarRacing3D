@@ -73,7 +73,14 @@ export function terrainColorAt(
     out: { r: number; g: number; b: number },
 ): void {
     const dirtT = smoothstep(DIRT_START_NY, DIRT_FULL_NY, normalY);
-    const rockT = smoothstep(ROCK_START_NY, ROCK_FULL_NY, normalY);
+    // Rock from steepness OR from altitude, whichever is stronger. Slope alone
+    // is enough for hills, but a mountain has broad gentle flanks high up that
+    // would otherwise stay bright grass — and a green mountain reads wrong when
+    // the whole point of raising the terrain was to get rock.
+    const rockT = Math.max(
+        smoothstep(ROCK_START_NY, ROCK_FULL_NY, normalY),
+        smoothstep(cfg.terrain.rockAltitudeStart, cfg.terrain.rockAltitudeFull, y),
+    );
 
     if (cfg.debug.showSlopeBands) {
         const base = rockT > 0.5 ? DEBUG_ROCK : dirtT > 0.5 ? DEBUG_DIRT : DEBUG_GRASS;

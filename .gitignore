@@ -34,3 +34,7 @@ build-*
 engine/
 skills/
 package-lock.json
+
+# Source art archives (FBX/blend/psd). Not runtime assets — anything in res/ is
+# copied into every build and base64-embedded by the single-file ad packers.
+art-source/
