@@ -277,8 +277,12 @@ in the order to apply them:
    P3W's valley flythrough. Start at 17 and only raise it if it reads as flat.
 3. Fix the allocation churn from §4.2.
 4. Cache a row of heights so `normalAt`'s ±x samples reuse neighbours.
-5. Keep P3W's LOD tiers (full res near, ½ mid, ¼ far) — the skirt already hides
-   the seams.
+5. ~~Keep P3W's LOD tiers~~ — **this does not reduce build cost in a forward
+   scroller, and the original claim here was wrong.** Chunks spawn at the FAR
+   edge and approach the player, so a tiered chunk is re-tessellated on the way
+   in: far + mid + near ≈ 1.37× the cost of one full-resolution build. LOD helps
+   triangles and GPU fill, not CPU. (It also conflicts with grid normals — see
+   the caveat in `chunkMesh.ts`.)
 
 Only measure-then-fix. `showStats: true` plus a `performance.now()` timer around
 the chunk build is the whole instrumentation needed.
