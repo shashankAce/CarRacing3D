@@ -56,6 +56,18 @@ export class TerrainStreamer {
     allTimePeakBuildMs = 0;
     /** Total chunks built, for a builds-per-second rate. */
     buildCount = 0;
+    /**
+     * Time spent building the opening window, ms. This is LOAD time, not a
+     * frame cost — it happens before the first frame is drawn — so it is kept
+     * out of the peaks above, which exist to find dropped frames. Pooling the
+     * two is misleading: the opening burst runs cold (interpreted, no JIT
+     * warmup, first touch of every buffer) and its slowest chunk was reading
+     * ~20x the steady-state figure while the game was in fact running at 60fps.
+     */
+    initialBuildMs = 0;
+
+    /** False during the opening burst, so load-time builds don't pollute the peaks. */
+    private _recordStats = true;
 
     get pendingBuilds(): number { return this._queue.length; }
     get residentChunks(): number { return this._byKey.size; }
@@ -229,10 +241,11 @@ export class TerrainStreamer {
         slot.mesh.visible = true;
 
         const elapsed = performance.now() - started;
+        this.buildCount++;
+        if (!this._recordStats) return;
         this.lastBuildMs = elapsed;
         if (elapsed > this.peakBuildMs) this.peakBuildMs = elapsed;
         if (elapsed > this.allTimePeakBuildMs) this.allTimePeakBuildMs = elapsed;
-        this.buildCount++;
     }
 
     /**
@@ -241,11 +254,17 @@ export class TerrainStreamer {
      * world assembling itself.
      */
     buildAllNow(): void {
+        this._recordStats = false;
+        const started = performance.now();
+
         this._lastBaseCz = Number.NaN;
         this.update();
         while (this._queue.length > 0) {
             const slot = this._queue.shift();
             if (slot?.inUse) this._build(slot);
         }
+
+        this.initialBuildMs = performance.now() - started;
+        this._recordStats = true;
     }
 }

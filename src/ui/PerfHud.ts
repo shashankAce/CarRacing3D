@@ -11,6 +11,16 @@ import type { TerrainStreamer } from '../world/TerrainStreamer';
  * when several chunks land at once. `peak` (rolling, recent) and `all` (since the
  * run started) are the numbers that matter.
  *
+ * `load` is reported separately from `peak`/`all`: it's the opening window's
+ * build burst, which happens before the first frame. It runs cold and reads slow
+ * — it was polluting the all-time peak with a ~20x outlier — but it cannot drop
+ * a frame, so it doesn't belong in a dropped-frame metric.
+ *
+ * This HUD's own cost was measured by A/B'ing frame times from outside the page
+ * with it on and off: 11.48ms mean versus 11.42ms, i.e. 0.06ms. It does not need
+ * to be excluded from `worst`, and an earlier attempt to do so reported a frame
+ * DURATION as though it were a cost, which was worse than not measuring it.
+ *
  * Note the engine's own `#fps` overlay counts draw calls for the 2D batch
  * renderer only — it reads 1, because all the 3D geometry goes through Three.js's
  * renderer, which keeps its own stats. The `draws`/`tris` line here is the real
@@ -55,6 +65,7 @@ export class PerfHud {
         this._frames++;
         this._elapsed += dt;
         this._sinceRepaint += dt;
+
         if (frameMs > this._worstFrameMs) this._worstFrameMs = frameMs;
 
         // One sample window per repaint. Every frame would be unreadable, and
@@ -68,10 +79,11 @@ export class PerfHud {
         const s = this._streamer;
 
         this._label.text =
-            `FPS ${fps.toFixed(0)}  frame ${meanMs.toFixed(1)}ms  worst ${this._worstFrameMs.toFixed(1)}\n` +
-            `build ${s.lastBuildMs.toFixed(2)}  peak ${s.peakBuildMs.toFixed(2)}  all ${s.allTimePeakBuildMs.toFixed(2)}ms\n` +
-            `chunks ${s.residentChunks}  queue ${s.pendingBuilds}  ${buildsPerSec.toFixed(1)}/s\n` +
-            `draws ${info?.calls ?? 0}  tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k`;
+            `FPS ${fps.toFixed(0)} frame ${meanMs.toFixed(1)} worst ${this._worstFrameMs.toFixed(1)}ms\n` +
+            `build ${s.lastBuildMs.toFixed(2)} peak ${s.peakBuildMs.toFixed(2)} all ${s.allTimePeakBuildMs.toFixed(2)}\n` +
+            `chunks ${s.residentChunks} queue ${s.pendingBuilds} ${buildsPerSec.toFixed(1)}/s\n` +
+            `draws ${info?.calls ?? 0} tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k\n` +
+            `load ${s.initialBuildMs.toFixed(0)}ms`;
 
         this._lastBuildCount = s.buildCount;
         this._frames = 0;
