@@ -1,0 +1,36 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependency directories
+node_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional eslint cache
+.eslintcache
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# Vite files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
+
+# match3-playable build output (npm run build / pack:<target>)
+build
+build-*
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# Vendored engine source and reference docs
+engine/
+skills/
+package-lock.json
