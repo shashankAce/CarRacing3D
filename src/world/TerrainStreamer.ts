@@ -47,9 +47,21 @@ export class TerrainStreamer {
     /** Last window centre, so the window is only recomputed when it moves. */
     private _lastBaseCz = Number.NaN;
 
-    /** Diagnostics — read by the HUD in dev. */
+    // ── Diagnostics, read by PerfHud ──────────────────────────────────────
+    /** Cost of the most recent single chunk build, ms. */
     lastBuildMs = 0;
+    /** Worst single chunk build since `resetPeak()`. */
+    peakBuildMs = 0;
+    /** Worst single chunk build since the run started — the hitch to hunt. */
+    allTimePeakBuildMs = 0;
+    /** Total chunks built, for a builds-per-second rate. */
+    buildCount = 0;
+
     get pendingBuilds(): number { return this._queue.length; }
+    get residentChunks(): number { return this._byKey.size; }
+
+    /** Clears the rolling peak so it tracks the recent worst, not the startup burst. */
+    resetPeak(): void { this.peakBuildMs = 0; }
 
     constructor(scene: THREE.Scene, scroll: WorldScroll) {
         this._scroll = scroll;
@@ -190,17 +202,18 @@ export class TerrainStreamer {
         const limit = cfg.terrain.maxBuildsPerFrame;
         if (this._queue.length === 0) return;
 
-        const started = performance.now();
         for (let n = 0; n < limit; n++) {
             const slot = this._queue.shift();
             if (!slot) break;
             if (!slot.inUse) { n--; continue; }   // released while queued
             this._build(slot);
         }
-        this.lastBuildMs = performance.now() - started;
     }
 
     private _build(slot: ChunkSlot): void {
+        // Timed per chunk, not per drain loop: the per-chunk number is the one
+        // that has to fit in a frame, and it's what `maxBuildsPerFrame` bounds.
+        const started = performance.now();
         fillChunkBuffers(
             slot.cx, slot.cz, cfg.terrain.resolution,
             slot.positions, slot.normals, slot.uvs, slot.colors,
@@ -214,6 +227,12 @@ export class TerrainStreamer {
         slot.mesh.position.z = this._scroll.travelled - slot.cz * cfg.terrain.chunkSize;
         slot.ready = true;
         slot.mesh.visible = true;
+
+        const elapsed = performance.now() - started;
+        this.lastBuildMs = elapsed;
+        if (elapsed > this.peakBuildMs) this.peakBuildMs = elapsed;
+        if (elapsed > this.allTimePeakBuildMs) this.allTimePeakBuildMs = elapsed;
+        this.buildCount++;
     }
 
     /**

@@ -12,7 +12,10 @@ import type { GameState } from '../game/GameState';
  * Everything is centre-anchored on purpose. The resolution policy is
  * FIXED_HEIGHT, so the design WIDTH varies with device aspect ratio — anything
  * pinned near a left or right edge would need the Widget system, which the
- * build currently trims out. Design space is top-left origin, Y-DOWN.
+ * build currently trims out.
+ *
+ * Node positions are Y-UP: y is measured from the bottom of the design space.
+ * See the note on `hud.distanceY` in gameConfig.
  */
 export class Hud {
 
@@ -25,17 +28,27 @@ export class Hud {
 
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
-        this._distance = this._makeLabel(scene, cx, cfg.hud.distanceY, cfg.hud.distanceFontSize, cfg.hud.textColor);
-        this._speed = this._makeLabel(scene, cx, cfg.hud.speedY, cfg.hud.speedFontSize, cfg.hud.textColor);
+        // These two change every frame — hence `dynamic`. The hint doesn't.
+        this._distance = this._makeLabel(scene, cx, cfg.hud.distanceY, cfg.hud.distanceFontSize, cfg.hud.textColor, true);
+        this._speed = this._makeLabel(scene, cx, cfg.hud.speedY, cfg.hud.speedFontSize, cfg.hud.textColor, true);
         this._hint = this._makeLabel(scene, cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
         this._hint.text = cfg.hud.hintText;
     }
 
-    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string): Label {
+    /**
+     * `dynamic` matters here and isn't cosmetic. A non-dynamic Label re-bakes
+     * through a SHARED canvas into an async ImageBitmap whenever its text
+     * changes; the distance and speed readouts change every frame, so that's an
+     * ImageBitmap per label per frame. `dynamic` gives each one its own canvas
+     * baked synchronously, which is what the engine documents it for
+     * ("use for counters/timers").
+     */
+    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string, dynamic = false): Label {
         const node = new Node(x, y);
         const label = node.addComponent(Label);
         label.fontSize = fontSize;
         label.color = color;
+        label.dynamic = dynamic;
         label.text = '';
         scene.addChild(node);
         return label;

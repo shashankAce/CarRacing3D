@@ -9,6 +9,7 @@ import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
 import { RoadMesh } from '../world/RoadMesh';
 import { Hud } from '../ui/Hud';
+import { PerfHud } from '../ui/PerfHud';
 
 /**
  * GameScene — Phase 3: infinite scroll.
@@ -39,6 +40,7 @@ export class GameScene extends Scene {
     private _terrain: TerrainStreamer;
     private _road: RoadMesh;
     private _hud: Hud;
+    private _perf: PerfHud | null = null;
 
     onLoad(): void {
         // Idempotent — the engine config already ran this, but calling it here
@@ -79,6 +81,7 @@ export class GameScene extends Scene {
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._hud = new Hud(this);
+        if (cfg.debug.showPerf) this._perf = new PerfHud(this, this._terrain, sys);
     }
 
     private _buildLights(): void {
@@ -115,6 +118,7 @@ export class GameScene extends Scene {
         this._markers.update();
         this._camera.update(dt, this._car, this._state.speedT);
         this._hud.update(this._state, this._input.hasSteered);
+        this._perf?.update(dt);
     }
 
     onUnload(): void {

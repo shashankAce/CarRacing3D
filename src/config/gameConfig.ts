@@ -274,7 +274,38 @@ export const gameConfig = {
     },
 
     hud: {
-        /** Design space is top-left origin, Y-DOWN. Small y = top of screen. */
+        /**
+         * Performance counters — see `debug.showPerf`. Placed high, where the
+         * frame is sky, so the readout never sits over the car.
+         */
+        perfY: 1040,
+        /**
+         * 24, not larger: FIXED_HEIGHT means the design WIDTH shrinks on taller
+         * phones — a 19.5:9 screen gives only ~591 design units — and the
+         * longest line here is ~34 monospace characters.
+         */
+        perfFontSize: 24,
+        /** Dark, because it's read against sky and against green hills. */
+        perfColor: '#0d2b33',
+        /**
+         * Seconds per sample window. Also the repaint interval. Has to be long
+         * enough that the build RATE is meaningful: chunks arrive in rows of 6
+         * roughly every 0.6s at top speed, so a 0.25s window reads 0/s most of
+         * the time and a big number occasionally. One second is stable, and
+         * `worst` still catches any spike inside it.
+         */
+        perfRepaintInterval: 1.0,
+        /**
+         * NOTE ON THE Y AXIS: node positions are Y-UP — y is measured from the
+         * BOTTOM of the design space. So `distanceY: 90` is near the bottom edge
+         * and `hintY: 1180` is near the top.
+         *
+         * Don't be misled by `Display.js`'s "top-left origin, Y-down" comment:
+         * that describes `screenToDesignInto`, the screen→design step of POINTER
+         * conversion, which is a different space from node placement (pointer
+         * events then go through `camera.screenToWorld`, landing back in Y-up
+         * world coords).
+         */
         distanceY: 90,
         speedY: 150,
         hintY: 1180,
@@ -391,6 +422,15 @@ export const gameConfig = {
          * answer. Chunks are built once, so this needs a reload to take effect.
          */
         showSlopeBands: false,
+        /**
+         * On-screen performance counters: FPS and worst frame time, per-chunk
+         * build cost (last / recent peak / all-time peak), resident chunk count,
+         * build queue depth and rate, and Three.js draw calls and triangles.
+         *
+         * Left ON while profiling on real devices. Turn it off before shipping —
+         * it's a per-frame label bake and it covers the screen.
+         */
+        showPerf: true,
     },
 
     /**

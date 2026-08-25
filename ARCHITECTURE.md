@@ -159,8 +159,14 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
 12. `assetCache.loadModel()` exists for FBX/GLB and **returns a fresh clone
     every call, including cache hits** — a model scene can only have one
     parent. Relevant for the later model swap; irrelevant now.
-13. **2D design space is top-left origin, Y-DOWN**
-    (`engine/lib/core/Display.js:407`) — small `y` is the top of the screen.
+13. **Node positions are Y-UP** — a node's `y` is measured from the BOTTOM of
+    the design space, so `new Node(x, 1180)` on a 1280-tall design sits near the
+    TOP. Verified from a render, after getting it backwards from a doc comment:
+    `engine/lib/core/Display.js:407` does say "top-left origin, Y-down", but that
+    describes `screenToDesignInto`, the screen→design step of POINTER conversion
+    — a different space from node placement (pointer events then pass through
+    `camera.screenToWorld`, which lands back in Y-up world coords). Don't infer
+    the node convention from the input convention.
     And because the policy is `FIXED_HEIGHT`, the design **width** varies with
     the device's aspect ratio: `cfg.design.width` is the design-time value, not
     a runtime truth. Read `inputListener.engine.display.designWidth` for the
