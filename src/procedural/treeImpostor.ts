@@ -30,6 +30,16 @@ export function bakeTreeImpostor(
     const target = new THREE.WebGLRenderTarget(size, size, {
         // Transparent background, and mipmaps because these quads are viewed at
         // small screen sizes where an unmipmapped texture aliases badly.
+        //
+        // Do NOT set `colorSpace: SRGBColorSpace` here. It looks like the fix
+        // that cloudTexture.ts needs, and it is the opposite. When rendering to
+        // a non-XR render target three.js forces the output colour space to
+        // ColorManagement.workingColorSpace (WebGLRenderer.js, the
+        // `_currentRenderTarget === null ? ... ` line) and IGNORES the target's
+        // own colorSpace -- so the renderer always writes LINEAR here. Leaving
+        // the texture at the default NoColorSpace means the sampler also skips
+        // the decode, and the round trip is consistent. Declaring sRGB would
+        // decode values that were never encoded, darkening every impostor.
         format: THREE.RGBAFormat,
         generateMipmaps: true,
         minFilter: THREE.LinearMipmapLinearFilter,

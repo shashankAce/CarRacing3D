@@ -3,6 +3,7 @@ import { GameEngine, createPlatform, ResolutionPolicy, RendererType } from 'noon
 import { gameConfig as cfg } from './config/gameConfig';
 import { GameScene } from './scenes/GameScene';
 import { installFogCurve } from './procedural/fogCurve';
+import { resolveTimeOfDay } from './config/timeOfDay';
 
 /**
  * Entry point. See ARCHITECTURE.md for the design, the verified engine
@@ -15,6 +16,11 @@ import { installFogCurve } from './procedural/fogCurve';
 // Reshapes THREE's FogExp2 exponent. Global ShaderChunk surgery, so it has to
 // happen before any shader program is built — see procedural/fogCurve.ts.
 installFogCurve();
+
+// Turns the configured (or device-local) hour into sunDirection + ambient,
+// which the sky, the derived fog and the shadow frustum all read. Must run
+// BEFORE the scene is constructed, since GameScene derives fog from the sun.
+resolveTimeOfDay();
 
 const platform = createPlatform();
 await platform.initialize();  // must be awaited BEFORE constructing GameEngine

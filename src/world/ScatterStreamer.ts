@@ -230,9 +230,11 @@ export class ScatterStreamer {
         // Drop chunks that are gone, add the ones that appeared. Placement
         // generation is the expensive part, so it happens once per chunk rather
         // than once per frame.
-        // Trees use a SHORTER window than the terrain: the far chunks are 98%
-        // fog-hidden, so scattering there costs triangles in both the main and
-        // shadow pass to draw an invisible smudge. See `trees.maxChunksAhead`.
+        // `trees.maxChunksAhead` bounds the scatter window independently of the
+        // terrain window. It currently matches it, because the far tier makes a
+        // distant tree two triangles; it existed to stop geometry being spent on
+        // fog-hidden smudges, which is only a concern if the crossover moves out
+        // far enough that far chunks hold real geometry again.
         const baseCz = Math.floor(this._scroll.travelled / cfg.terrain.chunkSize);
         const maxCz = baseCz + cfg.trees.maxChunksAhead;
 

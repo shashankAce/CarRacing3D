@@ -38,12 +38,20 @@ import { gameConfig as cfg } from '../../config/gameConfig';
  *    over. The price is that the dome must ENCLOSE all geometry — see
  *    `sky.domeRadius` and `camera.far`.
  */
-export function effectiveHorizonColor(): THREE.Color {
+/**
+ * How high the sun sits, 0 (on the horizon) to 1 (overhead). The single number
+ * every day/night blend is driven by — sky horizon, sky zenith, cloud tint and
+ * the derived fog all read it, so they cannot drift apart.
+ */
+export function sunHeight(): number {
     const d = cfg.lighting.sunDirection;
     const len = Math.hypot(d.x, d.y, d.z) || 1;
-    const sunHeight = Math.max(0, Math.min(1, d.y / len));
-    return new THREE.Color(cfg.sky.horizonSunsetColor)
-        .lerp(new THREE.Color(cfg.sky.horizonColor), sunHeight);
+    return Math.max(0, Math.min(1, d.y / len));
+}
+
+export function effectiveHorizonColor(): THREE.Color {
+    return new THREE.Color(cfg.sky.horizonLowColor)
+        .lerp(new THREE.Color(cfg.sky.horizonColor), sunHeight());
 }
 
 export class SkyDome {
@@ -60,8 +68,9 @@ export class SkyDome {
             fragmentShader: FRAGMENT_SHADER,
             uniforms: {
                 uZenithColor: { value: new THREE.Color(s.zenithColor) },
+                uZenithLowColor: { value: new THREE.Color(s.zenithLowColor) },
                 uHorizonColor: { value: new THREE.Color(s.horizonColor) },
-                uHorizonSunsetColor: { value: new THREE.Color(s.horizonSunsetColor) },
+                uHorizonSunsetColor: { value: new THREE.Color(s.horizonLowColor) },
                 uSunGlowColor: { value: new THREE.Color(s.sunGlowColor) },
                 uSunDirection: { value: new THREE.Vector3(sun.x, sun.y, sun.z).normalize() },
                 uSkyTopHeight: { value: s.skyTopHeight },
@@ -108,6 +117,7 @@ void main() {
 const FRAGMENT_SHADER = /* glsl */`
 varying vec3 vLocalPosition;
 uniform vec3 uZenithColor;
+uniform vec3 uZenithLowColor;
 uniform vec3 uHorizonColor;
 uniform vec3 uHorizonSunsetColor;
 uniform vec3 uSunGlowColor;
@@ -123,6 +133,12 @@ void main() {
     // the sky — stylised, not a scattering model.
     float sunHeight = clamp(uSunDirection.y, 0.0, 1.0);
     vec3 horizon = mix(uHorizonSunsetColor, uHorizonColor, sunHeight);
+    // The zenith tracks the sun too. Blending only the horizon left the top of
+    // the sky midday-blue under a sunset, which is the one part of a low-sun sky
+    // people actually notice is wrong. Done in the shader rather than resolved
+    // on the CPU so it mixes in LINEAR space, exactly like the horizon above --
+    // two blends of the same pair in different spaces drift apart visibly.
+    vec3 zenith = mix(uZenithLowColor, uZenithColor, sunHeight);
 
     // ONE monotone ramp from the fog colour at the horizon to the zenith.
     //
@@ -141,7 +157,7 @@ void main() {
     // dome showing through a chunk seam is invisible against fogged terrain.
     // (No backticks in here -- this is inside a template literal.)
     float t = pow(smoothstep(0.0, uSkyTopHeight, max(h, 0.0)), uHorizonHold);
-    vec3 sky = mix(horizon, uZenithColor, t);
+    vec3 sky = mix(horizon, zenith, t);
 
     float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
     sky += uSunGlowColor * (pow(sunDot, 84.0) * 0.5 + pow(sunDot, 1820.0) * 2.0);

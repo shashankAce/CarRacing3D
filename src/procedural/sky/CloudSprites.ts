@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
+import { sunHeight } from './SkyDome';
 import { createCloudSpriteTexture } from './cloudTexture';
 import { mulberry32 } from '../random';
 
@@ -74,6 +75,14 @@ export class CloudSprites {
                 transparent: true,
                 depthWrite: false,
                 opacity: c.opacity,
+                // Tinted by how high the sun is. Unlit geometry gets no lighting
+                // for free, so without this the clouds stayed pure white at
+                // sunset and only looked warm where the orange sky showed
+                // through their 20% transparency — which reads as clouds sitting
+                // in FRONT of the time of day rather than being part of it.
+                // THREE.Color.lerp works in linear space, matching how the dome
+                // blends its own horizon and zenith off the same sunHeight().
+                color: new THREE.Color(c.lowColor).lerp(new THREE.Color(c.color), sunHeight()),
                 // Unlit on purpose: these read as distant sky, and lighting them
                 // would tie their brightness to the shadow-casting sun for no
                 // visual gain. Fog off for the same reason — they're meant to be

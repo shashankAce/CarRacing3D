@@ -117,12 +117,17 @@ export const gameConfig = {
          */
         chunksWide: 6,
         /**
-         * Draw distance, in chunks. Derived FROM `world.fogDensity`, not chosen
-         * independently: the spawn edge has to be far enough out that fog hides
-         * essentially all of it, or chunks visibly pop into view. At density
-         * 0.007, fog hides 86% at 160m — and that remaining 14% was plainly
-         * visible as terrain and road appearing ahead of the car. 7 chunks =
-         * 280m, where 97.9% is hidden.
+         * Draw distance, in chunks. Derived FROM `world.fogDensity` and
+         * `world.fogFalloff`, not chosen independently: the spawn edge has to be
+         * far enough out that fog hides essentially all of it, or chunks visibly
+         * pop into view. At the current curve fog hides 64% at 160m, 92% at
+         * 200m, 99.5% at 240m and 99.99% at 280m. 7 chunks = 280m.
+         *
+         * There is SPARE HEADROOM here now: full occlusion (0.5% residual)
+         * arrives at 241m, so 6 chunks would very nearly do. That is the first
+         * place to look if chunk builds or draw calls need trimming — but
+         * re-derive it if the fog changes, and note 240m sits exactly on the
+         * threshold rather than comfortably past it.
          *
          * This does NOT raise the chunk build RATE, which is set by
          * speed / chunkSize — one row per 40m travelled however far ahead it
@@ -700,8 +705,35 @@ export const gameConfig = {
      * it. Change it in one place and everything agrees.
      */
     lighting: {
+        /**
+         * Ambient at FULL sun. `timeOfDay` interpolates away from this toward
+         * `ambientColorLow`/`ambientIntensityLow` as the sun drops, and lands
+         * exactly back on these two at solar noon — so the approved daylight
+         * look is preserved rather than approximated.
+         */
         ambientColor: 0x8ba6bd,
         ambientIntensity: 0.8,
+        /**
+         * Ambient at the sun's floor. A low sun stops filling the scene: at 9
+         * degrees an upward terrain normal gets N.L ~ 0.16, so the sun's
+         * contribution falls from ~2.29 to ~0.46 and the whole scene goes muddy
+         * (measured, not estimated). 1.75 brings the total back to ~2.2 of the
+         * daylight ~3.1 — deliberately not all the way, because full
+         * compensation flattens the shaping that makes dusk read as dusk.
+         *
+         * The colour matters as much as the level: at sunset the fill light
+         * comes off an orange sky, so keeping the daylight blue makes lit faces
+         * look wrong in a way that is hard to place.
+         */
+        ambientColorLow: 0xd9a179,
+        /**
+         * Dawn's fill light, the cool counterpart of `ambientColorLow`. Fill
+         * comes off the sky, so leaving this warm under a blue-grey pre-dawn sky
+         * mismatches lit faces against their own background — the same error as
+         * leaving it blue under a sunset.
+         */
+        ambientColorLowDawn: 0x93a6c4,
+        ambientIntensityLow: 1.75,
         sunColor: 0xfff2dd,
         sunIntensity: 2.9,
         /**
@@ -714,6 +746,52 @@ export const gameConfig = {
          * scene. 0.80 keeps the sun low enough for legible shadows.
          */
         sunDirection: { x: 0.38, y: 0.80, z: 0.5 },
+        /**
+         * Time of day. RESOLVED AT BOOT — `resolveTimeOfDay()` overwrites
+         * `sunDirection`, `ambientColor` and `ambientIntensity` above before the
+         * scene is built, so everything downstream (sky gradient, derived fog
+         * and background, light direction, shadow frustum) follows from one
+         * vector with no other wiring.
+         *
+         * `mode: 'fixed'` is the default ON PURPOSE. This is a reskin template:
+         * a client approves one look, and live time would show their users a
+         * different one depending on when they opened it — and an ad network
+         * reviewing at 2am would see the darkest version. Ship 'fixed' unless
+         * live time is a deliberate feature of the campaign, and use 'fixed'
+         * for QA either way so screenshots are reproducible.
+         */
+        timeOfDay: {
+            /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
+            mode: 'fixed' as 'fixed' | 'local',
+            /** Hour used by 'fixed' mode, 0-24 and fractional. 13 ~ the approved daylight look. */
+            hour: 2,
+            /**
+             * The sun NEVER drops below this, degrees — so 3am renders as the
+             * dusk look rather than as darkness. Non-negotiable for a playable:
+             * it has to sell in two seconds at whatever hour it opens, and it
+             * may be reviewed at any of them.
+             */
+            minElevation: 8,
+            /** Elevation at solar noon, degrees. ~53 reproduces the tuned `sunDirection`. */
+            maxElevation: 53,
+            /** Hours between which the sun rises above the floor. */
+            sunrise: 6,
+            sunset: 19,
+            /**
+             * Azimuth swept across the day, degrees, centred on the tuned
+             * direction — this is what makes morning and evening differ, by
+             * swinging the shadows across the road rather than only shortening
+             * them.
+             *
+             * HARD LIMIT: centre + swing must stay under 90, or the sun crosses
+             * in FRONT of the camera and the scene turns backlit with shadows
+             * stretching toward the viewer. That is a legitimate look, but it
+             * should be chosen, not arrived at by widening a number. (It is also
+             * the only way `sky.sunGlowColor` ever renders — see its note.)
+             */
+            azimuthCenter: 37,
+            azimuthSwing: 43,
+        },
         /** How far along `sunDirection` the light is placed, metres. */
         sunDistance: 90,
         /**
@@ -798,24 +876,15 @@ export const gameConfig = {
         /** Ceiling on live instances per variant. */
         maxPerVariant: 120,
         /**
-         * Trees are only scattered on chunks within this many ahead of the car,
-         * even though terrain streams further.
-         *
-         * The terrain window reaches 7 chunks (280m), where fog hides 98% of a
-         * surface's colour — trees out there cost triangles in the main pass AND
-         * the shadow pass to render an invisible smudge. Cutting to 4 chunks
-         * (160m, 71% hidden) drops the live count by roughly half and removes
-         * nothing the player can see.
-         */
-        /**
-         * Trees are scattered on chunks within this many ahead. Now the FULL
+         * Trees are scattered on chunks within this many ahead — the FULL
          * terrain window, because past `lodCrossover` a tree is two triangles
-         * instead of ~60 — so reaching the draw edge, where fog hides 98%, costs
-         * less than stopping short at 4 chunks did with geometry all the way out.
+         * instead of ~60, so reaching the draw edge costs less than stopping
+         * short at 4 chunks did with geometry all the way out.
          *
-         * Stopping short was the actual cause of trees being visible at distance:
-         * the window ended at ~200m, where fog still leaves 14% of a tree's
-         * colour showing, so they winked out while still faintly visible.
+         * Stopping short was the actual cause of trees being visible at
+         * distance: the window ended at ~200m, where fog still leaves 8% of a
+         * tree's colour showing, so they winked out while still faintly visible.
+         * At the draw edge fog leaves 0.006%.
          */
         maxChunksAhead: 7,
         /**
@@ -873,9 +942,68 @@ export const gameConfig = {
      * of as fading to white.
      */
     sky: {
+        /**
+         * Zenith at FULL sun. The sky shader blends toward `zenithLowColor` as
+         * the sun drops, the same way it blends the horizon — so the top of the
+         * sky tracks time of day instead of staying midday blue under a sunset.
+         */
         zenithColor: 0x2b6ad4,
+        /** Zenith before sunrise: deep, cool, still holding night. */
+        zenithDawnColor: 0x1d3a6b,
+        /** Zenith after sunset: violet, the classic complement to an orange horizon. */
+        zenithSunsetColor: 0x4a3a78,
+        /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
+        zenithLowColor: 0x4a3a78,
         horizonColor: 0x7fc2ea,
+        /**
+         * The horizon colour at a low sun; `horizonColor` is where it lands at a
+         * high one, blended by the sun's height. `effectiveHorizonColor()` runs
+         * the same blend on the CPU to derive the scene's fog and background, so
+         * fog matches the sky at ANY sun angle by construction rather than by a
+         * hand-matched constant.
+         *
+         * Verified at a sunset angle (sunDirection.y 0.10, sunHeight 0.157):
+         * predicted rgb(226,153,124), measured on screen rgb(226,152,124). Both
+         * halves of the reskin — sky and fog — track the sun together.
+         *
+         * Note the scene goes genuinely dim there: at 9 degrees of sun elevation
+         * a mostly-upward terrain normal gets N.L ~ 0.16, so a sunset preset
+         * wants `lighting.ambientIntensity` raised to stay readable.
+         */
         horizonSunsetColor: 0xef8f52,
+        /**
+         * The DAWN counterpart of `horizonSunsetColor`.
+         *
+         * Sun height alone cannot tell 4am from 8pm — both are a low sun — so
+         * without this, pre-dawn rendered as the same warm orange as sunset,
+         * which reads as plainly wrong when you know the time. Real pre-dawn
+         * twilight is cool: the sun is still below the horizon and what light
+         * there is has been scattered blue.
+         */
+        horizonDawnColor: 0x7d8fb3,
+        /**
+         * RESOLVED AT BOOT — the low-sun horizon colour actually in force, set
+         * from `horizonDawnColor` or `horizonSunsetColor`. This, not either of
+         * those, is what the sky shader and the derived fog read, so they cannot
+         * disagree about which half of the day it is.
+         */
+        horizonLowColor: 0xef8f52,
+        /**
+         * DEAD AT THE DEFAULT SUN ANGLE — the glow is only drawn where the sky
+         * dome faces the sun, and this camera never looks anywhere near it.
+         *
+         * `sunDirection.z` is POSITIVE, and the camera looks down -Z, so the sun
+         * sits 127 degrees off the view centre at the default angle (143 at a
+         * sunset one) against a frustum of about +/-19 degrees horizontal and
+         * +/-32 vertical. It has never been on screen, which means this colour
+         * and the two glow terms in SkyDome's shader have never rendered a
+         * pixel.
+         *
+         * To actually use it, `sunDirection.z` must go NEGATIVE to put the sun
+         * ahead of the car. That is a real look change, not just a knob: the
+         * whole scene becomes backlit and shadows stretch toward the camera.
+         * Worth knowing before reskinning against a value that does nothing.
+         */
         sunGlowColor: 0xfff2c8,
         /**
          * The horizon-to-zenith ramp. ONE curve, deliberately — there is no
@@ -959,6 +1087,22 @@ export const gameConfig = {
              */
             arcDegrees: 34,
             opacity: 0.8,
+            /**
+             * Cloud tint at FULL sun — white, because a lit cloud is white.
+             *
+             * Clouds are unlit (`fog: false`, MeshBasicMaterial), so nothing
+             * tied them to the sun: at sunset they stayed pure white and only
+             * looked warm where the orange sky showed through their 20%
+             * transparency. Real clouds take the colour of the light hitting
+             * them, and at a low sun that is most of what you notice about them.
+             */
+            color: 0xffffff,
+            /** Cloud tint before sunrise — cool, catching a sky that has no sun in it yet. */
+            dawnColor: 0x9fb0cc,
+            /** Cloud tint after sunset — warm, lit from below by a sun under the horizon. */
+            sunsetColor: 0xf0b48a,
+            /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
+            lowColor: 0xf0b48a,
             /**
              * Radians per second of azimuth drift. ZERO on purpose: clouds this
              * far away have no perceptible parallax against a car, so drift just

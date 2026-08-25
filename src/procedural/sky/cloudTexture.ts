@@ -87,6 +87,19 @@ export function createCloudSpriteTexture(size: number, seed: number): THREE.Canv
     ctx.putImageData(image, 0, 0);
 
     const texture = new THREE.CanvasTexture(canvas);
+    // MANDATORY for any texture holding COLOUR. A canvas stores sRGB bytes, but
+    // Texture.colorSpace defaults to NoColorSpace, so without this the shader
+    // skips the sRGB -> linear decode and uses the encoded bytes as if they were
+    // linear -- rendering the texture far too bright and, worse, FLAT.
+    //
+    // Measured here: the authored shading runs 0.82 -> 1.0 (bytes 209 -> 255).
+    // Undecoded it rendered as 234 -> 255, compressing the puff's internal
+    // contrast by 2.4x, which is a large part of why the clouds read as washed
+    // out. Same class of bug as SkyDome's missing colorspace_fragment; see
+    // ARCHITECTURE.md gotcha 15.
+    //
+    // Alpha is never colour-managed, so only the RGB shading was affected.
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.generateMipmaps = true;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;

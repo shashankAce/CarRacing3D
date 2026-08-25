@@ -1,5 +1,6 @@
 import { Node, Label, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
+import { resolvedTimeOfDay } from '../config/timeOfDay';
 import type { TerrainStreamer } from '../world/TerrainStreamer';
 import type { ScatterStreamer } from '../world/ScatterStreamer';
 
@@ -89,7 +90,7 @@ export class PerfHud {
             // distance can be tuned by eye against what it actually did.
             `lod ${cfg.trees.lodCrossover}m near ${this._scatter.nearCount} far ${this._scatter.farCount}\n` +
             `draws ${info?.calls ?? 0} tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k\n` +
-            `load ${s.initialBuildMs.toFixed(0)}ms`;
+            `load ${s.initialBuildMs.toFixed(0)}ms  ${timeOfDayLine()}`;
 
         this._lastBuildCount = s.buildCount;
         this._frames = 0;
@@ -98,4 +99,13 @@ export class PerfHud {
         this._sinceRepaint = 0;
         s.resetPeak();
     }
+}
+
+/** Which hour the sun was resolved to, so time-of-day can be verified on device. */
+function timeOfDayLine(): string {
+    const t = resolvedTimeOfDay();
+    if (!t) return '';
+    const hh = Math.floor(t.hour).toString().padStart(2, '0');
+    const mm = Math.floor((t.hour % 1) * 60).toString().padStart(2, '0');
+    return `${t.source} ${hh}:${mm} sun ${t.elevation.toFixed(0)}deg${t.clamped ? '*' : ''}`;
 }
