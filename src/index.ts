@@ -10,7 +10,7 @@ import { GameScene } from './scenes/GameScene';
 
 // Host-platform wrapper. Never branch on `platform.name`; the one capability
 // worth branching on is `platform.isAdCreative` (a creative needs a CTA
-// button, a hosted game must not show one) — that lands in Phase 6.
+// button, a hosted game must not show one) — that lands in Phase 7.
 const platform = createPlatform();
 await platform.initialize();  // must be awaited BEFORE constructing GameEngine
 
@@ -30,6 +30,6 @@ engine.runScene(new GameScene());
 engine.start();
 
 // Nothing to preload yet — the world is generated, not loaded. Once there is a
-// real generation step (Phase 5), drive `platform.reportProgress()` from it and
+// real generation step (Phase 6), drive `platform.reportProgress()` from it and
 // move this call to when the game is genuinely playable.
 platform.notifyReady();

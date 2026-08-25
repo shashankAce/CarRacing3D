@@ -73,7 +73,7 @@ build-meta-playables.html   917.9 KB / 2 MB limit   (1 file / 1 limit)
 The floor is **~918KB, leaving ~1.08MB of headroom** before any content exists.
 Cross-checked against the reference above: all of P3W's *non*-three.js code —
 terrain, river, water shaders, trees, grass, rocks — is only ~100KB of the 655KB
-it ships, so Phase 5's port should cost well under 100KB.
+it ships, so Phase 6's port should cost well under 100KB.
 
 **Size is not the binding constraint on this project — runtime performance is.**
 Do not spend time on byte-golfing before there is something to measure.
@@ -486,6 +486,8 @@ not assumptions to revisit.
 | D3 | How rich are the trees? | **Port, then measure.** Start with P3W's generator at its cheap `ringDetail: 0.4` tier and a **3-variant** pool, and measure both boot-time generation cost and frame cost. If either is material, fall back to a simple cone/sphere tree — at this camera distance the full skeleton may be invisible detail we're paying full price for. |
 | D4 | Portrait 720×1280? | **Yes** — matches the existing scaffold and `pack:google-playables --orientation=portrait`. |
 | D5 | Does the car follow a curving road on its own? | **No.** Settled 2026-08-25 after trying both. The car's lateral position is ABSOLUTE and only steering moves it; the clamp to the asphalt is what tracks the curve. So holding a bend takes input, and reaching an edge is a collision that shoves the car along it. Storing the car's position as an offset from the road centre was tried and rejected — it carried the car through bends with no input, making the curve decoration. |
+| D7 | Is speed automatic or player-controlled? | **Player-controlled** (Phase 5). Gas/brake, with a floor at `speed.min` deliberately set ABOVE the fastest traffic so vehicles can never overtake from behind and hit the player from a direction they cannot see. |
+| D8 | What ends a run besides crashing? | **Fuel**, draining on TIME rather than distance. Constant per-second burn means distance-per-tank is maximised by speed, which pushes the player to rush. Per-metre would make speed neutral; per-throttle would reward coasting. |
 | D6 | Can the car leave the road? | **No** — it clamps at the asphalt edge. But it rides `surfaceHeightAt` and has real suspension, so the code already behaves correctly if that ever changes. |
 
 ## 7. Implementation plan
@@ -521,18 +523,27 @@ minutes with no hitching, no seams, no drift.
 Pooled traffic boxes, lane spawn logic scaled by speed, hand-rolled collision,
 crash → game over → restart, near-miss scoring.
 
-**Phase 5 — the procedural environment.**
+**Phase 5 — player throttle and fuel.**
+Gas and brake replace the automatic speed ramp; four on-screen buttons (steer
+left/right, gas, brake) plus keyboard; a fuel tank that drains on time and ends
+the run when empty. Added at the owner's request after playing Phase 4, and it
+changes the shape of the game: the ramp used to supply the difficulty curve, and
+that job now belongs to the fuel clock plus the fact that the sharpest bends
+cannot be held at full speed. `road.curveAmplitude` goes to 8 for the same
+reason — see the balance note on that setting.
+
+**Phase 6 — the procedural environment.**
 Port `noise` → `ambientHeight` → the road-carving `heightField` → `terrainColor`
 → `chunkMesh`. Then per-chunk scatter with road rejection, then rocks, then
 trees, then LOD. Fix the §4.2 allocation churn as part of the port, not after.
 
-**Phase 6 — playable polish.**
+**Phase 7 — playable polish.**
 CTA button gated on `platform.isAdCreative`, `platform.triggerCTA(storeUrl)`
 (never `window.open`), `platform.notifyReady()` moved to when the game is
 genuinely playable, `platform.isAudioEnabled()` (a hard YouTube cert rule),
 tutorial hand/arrow prompt, restart, juice (speed lines, camera shake, particles).
 
-**Phase 7 — perf + size pass.**
+**Phase 8 — perf + size pass.**
 Profile on a real mid-range phone. Tune `resolutionScale`, draw distance, scatter
 density, chunk resolution. Re-pack and confirm the 2MB budget.
 
@@ -660,7 +671,7 @@ src/
   Also: `debug.showSlopeBands` was added and earned its keep — a screenshot with
   it on settled in one look that the rock band was being generated correctly and
   that fog was what made it look absent. Terrain colour bands are tuned to the
-  PLACEHOLDER hills; Phase 5's ridged mountains will need them re-derived.
+  PLACEHOLDER hills; Phase 6's ridged mountains will need them re-derived.
   Flagged, not done: the four wheel meshes are barely visible from a chase camera
   and are a cheap optimisation target (see the note in `PlayerCar._buildWheels`);
   traffic must not copy that pattern.
@@ -683,7 +694,34 @@ src/
   world freezes, tap restarts with a re-seeded road and no page errors.
   `tsc --noEmit` clean. Pack size **943.7KB / 2MB** (+7KB), draws 67 → 74.
 
-  Known rough edge, deferred to Phase 6: on impact the player's car is left
+  Known rough edge, deferred to Phase 7: on impact the player's car is left
   overlapping the vehicle it hit, because there's no separation or crash
   animation — the run simply stops. It reads as clipping. A short impact
   sequence (or just backing the car off to contact distance) is the fix.
+- **2026-08-25** — **Phase 5 done.** Player throttle and fuel, requested after
+  the owner played Phase 4. `src/ui/TouchControls.ts` (four hold-to-act buttons),
+  throttle + fuel on `GameState` with an `OUT_OF_FUEL` phase, a fuel gauge in the
+  HUD, and a run-end reason on the game-over panel. The automatic speed ramp is
+  gone. `road.curveAmplitude` raised 4.5 → 8: at 0.2×speed of lateral demand
+  against a 12 m/s steering limit that puts a hard ceiling of 60 m/s through the
+  sharpest bends, below the 66 m/s top speed — unholdable before a brake existed,
+  and the point of having one now.
+  The HUD moved to the top of the screen to clear room for the buttons.
+
+  Three findings worth keeping:
+  - **A node's hit box is anchored at its position, not centred**
+    (`InputListener._hitAABB` tests `0 <= local <= width/height`), and
+    `LabelSystem` writes a label's measured text size back into its node
+    (`LabelSystem.js:512`). So a button is a bare parent node carrying the hit
+    box with the glyph on a CHILD — put the glyph on the hit node and the touch
+    target shrinks to one character.
+  - **Release must be keyed on pointer id.** A per-node pointer-up never fires
+    for a finger that slides off the button, and a global "release everything"
+    drops the steering button the moment the player lifts their gas thumb.
+  - **Anchor on-screen controls to the LIVE `display.designWidth`.** Fixed
+    offsets from the design centre put the left button at x = -5 on a 19.5:9
+    phone, i.e. off the display.
+
+  Verified in a browser: gas measured 24 → 45 m/s over 3s at 7 m/s² (`163 km/h`,
+  matching the arithmetic exactly), press highlighting works, cuts still score,
+  crash and restart still work. `tsc --noEmit` clean.

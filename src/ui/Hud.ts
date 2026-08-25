@@ -23,10 +23,12 @@ export class Hud {
     private _speed: Label;
     private _hint: Label;
     private _cuts: Label;
+    private _fuel: Label;
     /** Only repaint the text when the displayed value actually changes. */
     private _lastMetres = -1;
     private _lastKph = -1;
     private _lastCuts = -1;
+    private _lastFuelCells = -1;
 
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
@@ -36,6 +38,9 @@ export class Hud {
         this._hint = this._makeLabel(scene, cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
         this._hint.text = cfg.hud.hintText;
         this._cuts = this._makeLabel(scene, cx, cfg.hud.cutsY, cfg.hud.cutsFontSize, cfg.hud.cutsColor, true);
+        this._fuel = this._makeLabel(scene, cx, cfg.hud.fuelY, cfg.hud.fuelFontSize, cfg.hud.fuelColor, true);
+        // Monospace, or the gauge's width changes as cells flip and it jitters.
+        this._fuel.fontFamily = 'monospace';
     }
 
     /**
@@ -68,6 +73,17 @@ export class Hud {
         if (kph !== this._lastKph) {
             this._lastKph = kph;
             this._speed.text = `${kph} km/h`;
+        }
+
+        // Only repaint when a whole cell flips — the gauge changes continuously
+        // but only ever shows `fuelCells` distinct states.
+        const cells = Math.ceil(state.fuelT * cfg.hud.fuelCells);
+        if (cells !== this._lastFuelCells) {
+            this._lastFuelCells = cells;
+            this._fuel.text = 'FUEL ' + '\u2593'.repeat(cells)
+                + '\u2591'.repeat(cfg.hud.fuelCells - cells);
+            this._fuel.color = state.fuelT <= cfg.fuel.warnAt
+                ? cfg.hud.fuelWarnColor : cfg.hud.fuelColor;
         }
 
         if (cuts !== this._lastCuts) {

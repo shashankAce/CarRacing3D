@@ -10,16 +10,17 @@ import { FollowCamera } from '../game/FollowCamera';
 import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
 import { RoadMesh } from '../world/RoadMesh';
+import { TouchControls } from '../ui/TouchControls';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 
 /**
- * GameScene — Phase 4: traffic and the game loop.
+ * GameScene — Phase 5: player throttle and fuel.
  *
  * Steering, the follow camera, the speed ramp, streamed terrain, the streamed
  * road ribbon, traffic, collision and the crash/restart loop are all live. Still
- * to come: the real procedural terrain field, scatter and LOD (Phase 5/6) — the
+ * to come: the real procedural terrain field, scatter and LOD (Phase 6/6) — the
  * height field's ambient hills are a cheap placeholder for now.
  *
  * The car never moves forward. It sits at the origin steering on X while the
@@ -36,6 +37,7 @@ import { GameOverPanel } from '../ui/GameOverPanel';
 export class GameScene extends Scene {
 
     private _state: GameState;
+    private _controls: TouchControls;
     private _input: InputController;
     private _car: PlayerCar;
     private _camera: FollowCamera;
@@ -66,7 +68,8 @@ export class GameScene extends Scene {
         this._buildLights();
 
         this._state = new GameState();
-        this._input = new InputController();
+        this._controls = new TouchControls(this);
+        this._input = new InputController(this._controls);
         this._input.attach();
 
         this._car = new PlayerCar(this);
@@ -117,7 +120,7 @@ export class GameScene extends Scene {
         this._input.sample();
 
         if (this._state.isRunning) {
-            this._state.update(dt);
+            this._state.update(dt, this._input.throttle);
             const travelled = this._state.scroll.travelled;
             // The car's world Z is `travelled` — it always renders at z ≈ 0.
             this._car.update(dt, this._input.axis, travelled, this._state.speed);
@@ -126,7 +129,10 @@ export class GameScene extends Scene {
             // Collision AFTER both have moved this frame, so neither is tested
             // against the other's previous position.
             const hit = findCollision(this._car, travelled, this._traffic);
-            if (hit) this._crash();
+            if (hit) this._endRun(cfg.hud.gameOverText);
+            // Fuel is checked after the collision, so a crash on the last drop
+            // of fuel reports as a crash rather than as an empty tank.
+            else if (!this._state.isRunning) this._endRun(cfg.hud.outOfFuelText);
 
             // World geometry follows the scroll before the camera reads the car,
             // so nothing is ever a frame behind what the player is looking at.
@@ -144,14 +150,15 @@ export class GameScene extends Scene {
         this._perf?.update(dt);
     }
 
-    private _crash(): void {
-        this._state.crash();
+    private _endRun(title: string): void {
+        this._state.end();
         this._gameOver.show(
+            title,
             this._state.distance,
             this._traffic.cuts,
             scoreFor(this._state.distance, this._traffic.cuts),
         );
-        // The tap that follows is the restart, not a steering input.
+        // The press that ended the run must not also count as the restart.
         this._input.consumeTap();
     }
 

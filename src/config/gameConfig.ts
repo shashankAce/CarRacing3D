@@ -68,16 +68,19 @@ export const gameConfig = {
          * ~8.4m of lateral shift across the visible 200m — a clearly visible
          * bend.
          *
-         * BALANCE: amplitude and frequency are not free. The lateral speed a
-         * bend demands is `amplitude × frequency × car speed`, and it must stay
-         * comfortably under `steering.maxLateralSpeed` or the road outruns the
-         * car at top speed and the player is pinned to the edge with no
-         * recovery available. At amplitude 8 the demand was 13.2 m/s against a
-         * 12 m/s maximum — literally unholdable. 4.5 asks for 7.4 m/s, i.e.
-         * 62% of max, which leaves room to correct. Re-check this ratio
-         * whenever any of the three numbers moves.
+         * BALANCE: the lateral speed a bend demands is
+         * `amplitude × frequency × car speed` — here 0.2 × speed — and it has to
+         * stay under `steering.maxLateralSpeed` (12) or the road outruns the car
+         * and the player is pinned to the edge with no recovery.
+         *
+         * At amplitude 8 that ceiling is **60 m/s (216 km/h)**, below the 66 m/s
+         * top speed. Before the brake existed that made 8 unholdable and it was
+         * dropped to 4.5. WITH a brake it becomes the mechanic: the sharpest
+         * bends cannot be taken flat out, so the player has to come off the gas.
+         * Re-check the ratio whenever amplitude, frequency, max speed or
+         * maxLateralSpeed moves.
          */
-        curveAmplitude: 4.5,
+        curveAmplitude: 8,
         curveFrequency: 0.018,
         /**
          * Vertical crests and dips, metres. Same deal as the curve: one
@@ -128,13 +131,13 @@ export const gameConfig = {
         /**
          * Depth of the downward wall hung off each chunk's border, hiding any
          * crack between neighbours. Unnecessary while every chunk is the same
-         * resolution, but it's what makes the Phase 6 LOD tiers a drop-in.
+         * resolution, but it's what makes the Phase 7 LOD tiers a drop-in.
          */
         skirtDepth: 5,
         /** Hard cap on chunk rebuilds per frame — the anti-hitch dial. */
         maxBuildsPerFrame: 1,
         /**
-         * PLACEHOLDER hills — a cheap 3-octave sine field. Phase 5 replaces
+         * PLACEHOLDER hills — a cheap 3-octave sine field. Phase 6 replaces
          * `ambientHeightAt` with the ported fbm + ridged-mountain field from
          * Procedural_3D_world, at which point `amplitude`/`baseFrequency` go
          * away and the slope thresholds below need re-tuning against it.
@@ -196,7 +199,7 @@ export const gameConfig = {
          * vs 19.8%).
          *
          * Note this is tuned to PLACEHOLDER hills, whose slopes are gentle.
-         * Phase 5's ported ridged-mountain field has genuinely steep faces and
+         * Phase 6's ported ridged-mountain field has genuinely steep faces and
          * will need these raised again, or the world turns grey.
          */
         rockSlopeStart: 0.25,
@@ -332,12 +335,73 @@ export const gameConfig = {
      * Speed ramp. Metres per second — multiply by 3.6 for the km/h readout.
      * 22 m/s ≈ 79 km/h, 66 m/s ≈ 238 km/h.
      */
+    /**
+     * Speed is now player-controlled: gas accelerates, brake decelerates, and
+     * releasing both coasts down. The old automatic ramp is gone — the ramp was
+     * what made the run get harder on its own, and that job now belongs to the
+     * fuel timer plus the fact that bends can't be held at full speed.
+     *
+     * `min` is above the FASTEST traffic (23 m/s) on purpose. If the player
+     * could brake below traffic speed, vehicles would overtake from behind and
+     * hit them from a direction they can't see — an unfair death, and the one
+     * thing worth designing out (§5.5a).
+     */
     speed: {
-        start: 22,
+        start: 30,
+        min: 24,
         max: 66,
-        /** m/s² — constant until `max`, so time-to-max = (max - start) / accel. */
-        acceleration: 1.6,
+        /** m/s² under gas. 7 takes 24 -> 66 in about six seconds. */
+        accelerate: 7,
+        /** m/s² under brake. Deliberately much stronger than the gas. */
+        brake: 14,
+        /** m/s² with neither held. */
+        coastDrag: 3,
     },
+
+    /**
+     * Fuel — the reason a run ends even when the player never crashes.
+     *
+     * Drains by TIME, not by distance. That is the whole point: with a constant
+     * per-second burn, distance per tank is maximised by going fast, so the
+     * player is pushed to rush. Draining per metre would make speed neutral, and
+     * draining by throttle would reward coasting — the opposite of the intent.
+     */
+    fuel: {
+        /** Seconds of fuel in a full tank. The main dial on run length. */
+        capacity: 55,
+        /** Fraction remaining at which the gauge turns to the warning colour. */
+        warnAt: 0.25,
+    },
+
+    /**
+     * On-screen controls: steering at the bottom left, throttle at the bottom
+     * right, thumbs in the corners.
+     *
+     * X positions are derived at build time from the LIVE design width, not from
+     * these numbers — under FIXED_HEIGHT the design width varies with aspect
+     * ratio (a 19.5:9 phone gives ~591 units against the nominal 720). A first
+     * pass placed them at fixed offsets from the centre, which put the left
+     * button at x = -5 on a narrow screen, i.e. off the display entirely.
+     *
+     * A node's position is the hit box's CORNER, not its centre
+     * (`InputListener._hitAABB` tests `0 <= local <= width/height`), and y is
+     * measured UP from the bottom.
+     */
+    controls: {
+        size: 150,
+        /** Glyph size inside a button. */
+        glyphSize: 62,
+        color: '#f2f6f8',
+        pressedColor: '#ffd24a',
+        /** Gap from the screen edge, and between the two steering buttons. */
+        edgeMargin: 26,
+        buttonGap: 12,
+        /** Heights of the bottom-left corners (y runs UP from the bottom). */
+        steerY: 140,
+        gasY: 250,
+        brakeY: 80,
+    },
+
 
     /**
      * Steering. Free lateral movement clamped to the road edges (§6 D2), with
@@ -393,7 +457,7 @@ export const gameConfig = {
          * Performance counters — see `debug.showPerf`. Placed high, where the
          * frame is sky, so the readout never sits over the car.
          */
-        perfY: 1040,
+        perfY: 930,
         /**
          * 24, not larger: FIXED_HEIGHT means the design WIDTH shrinks on taller
          * phones — a 19.5:9 screen gives only ~591 design units — and the
@@ -412,8 +476,8 @@ export const gameConfig = {
         perfRepaintInterval: 1.0,
         /**
          * NOTE ON THE Y AXIS: node positions are Y-UP — y is measured from the
-         * BOTTOM of the design space. So `distanceY: 90` is near the bottom edge
-         * and `hintY: 1180` is near the top.
+         * BOTTOM of the design space. So `hintY: 430` sits low on the screen and
+         * `distanceY: 1195` sits at the very top.
          *
          * Don't be misled by `Display.js`'s "top-left origin, Y-down" comment:
          * that describes `screenToDesignInto`, the screen→design step of POINTER
@@ -421,18 +485,36 @@ export const gameConfig = {
          * events then go through `camera.screenToWorld`, landing back in Y-up
          * world coords).
          */
-        distanceY: 90,
-        speedY: 150,
-        hintY: 1180,
-        /** Cars cut — the skill readout, so it sits near the distance. */
-        cutsY: 205,
+        distanceY: 1195,
+        speedY: 1135,
+        /**
+         * Below the buttons rather than over the road: at mid-height it sat on
+         * the car, and the band between the buttons and the game-over panel is
+         * too narrow to hold it. Down here it also reads as a legend for the
+         * controls it describes.
+         */
+        hintY: 45,
+        /** Cars cut — the skill readout, so it sits with the distance. */
+        cutsY: 1088,
         cutsFontSize: 30,
-        cutsColor: '#ffd98a',
+        cutsColor: '#8a5c10',
+        /**
+         * Fuel gauge, drawn as block glyphs in a monospace label. A real bar
+         * would need a ColorRect and the `graphics` system, which auto-trim
+         * strips from the build — not worth pulling a whole system in for one
+         * rectangle. Phase 7 can revisit.
+         */
+        fuelY: 1035,
+        fuelFontSize: 28,
+        fuelColor: '#1d6b32',
+        fuelWarnColor: '#b3301a',
+        fuelCells: 14,
         /** Game-over panel. */
         gameOverY: 760,
         gameOverFontSize: 76,
         gameOverColor: '#ffffff',
         gameOverText: 'CRASHED',
+        outOfFuelText: 'OUT OF FUEL',
         summaryY: 670,
         summaryFontSize: 34,
         restartY: 570,
@@ -442,9 +524,9 @@ export const gameConfig = {
         distanceFontSize: 62,
         speedFontSize: 34,
         hintFontSize: 26,
-        textColor: '#ffffff',
-        hintColor: '#d8e6ee',
-        hintText: 'HOLD LEFT / RIGHT TO STEER',
+        textColor: '#123a47',
+        hintColor: '#c9d9e2',
+        hintText: '◀ ▶ STEER    ▲ GAS    ▼ BRAKE',
     },
 
     /** Player car dimensions — placeholder boxes until FBX models land. */

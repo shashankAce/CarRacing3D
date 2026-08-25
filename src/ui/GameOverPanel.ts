@@ -10,7 +10,7 @@ import { gameConfig as cfg } from '../config/gameConfig';
  *
  * No dimming backdrop. That would need a full-screen ColorRect and the
  * `graphics`/`color-rect` system, which auto-trim currently strips from the
- * build — not worth pulling a system in for one rectangle. Phase 6 can revisit
+ * build — not worth pulling a system in for one rectangle. Phase 7 can revisit
  * if the text doesn't read against a bright reskin.
  */
 export class GameOverPanel {
@@ -39,9 +39,10 @@ export class GameOverPanel {
 
     get isVisible(): boolean { return this._visible; }
 
-    show(distance: number, cuts: number, score: number): void {
+    /** @param title Why the run ended — a crash and an empty tank read differently. */
+    show(title: string, distance: number, cuts: number, score: number): void {
         this._visible = true;
-        this._title.text = cfg.hud.gameOverText;
+        this._title.text = title;
         this._summary.text = `${Math.floor(distance)} m   ${cuts} cut   ${score} pts`;
         this._prompt.text = cfg.hud.restartText;
     }

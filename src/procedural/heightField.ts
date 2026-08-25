@@ -65,7 +65,7 @@ const CORRIDOR_HALF_WIDTH = cfg.road.halfWidth + FLAT_MARGIN;
  * is what actually creates slope, and therefore what makes the terrain read as
  * ground rather than as a tinted plane.
  *
- * Phase 5 replaces this body with the ported fbm + ridged-mountain field from
+ * Phase 6 replaces this body with the ported fbm + ridged-mountain field from
  * `Procedural_3D_world/src/terrain/ambientHeight.js`. Nothing else in this file
  * changes when it does — this function is the only seam.
  */

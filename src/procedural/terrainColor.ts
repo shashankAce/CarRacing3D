@@ -10,7 +10,7 @@ import { smoothstep } from './math';
  * palette swap with zero geometry change, and it costs no texture bytes, which
  * matters against a 2MB single-file budget.
  *
- * PLACEHOLDER banding — height and slope only. Phase 6 replaces it with the
+ * PLACEHOLDER banding — height and slope only. Phase 7 replaces it with the
  * richer grass/dirt/rock/sand/snow ramp ported from
  * `Procedural_3D_world/src/terrain/terrainColor.js`.
  *

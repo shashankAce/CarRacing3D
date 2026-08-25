@@ -1,52 +1,58 @@
 import { inputListener, Input } from 'noonengine';
+import { TouchControls, Control } from '../ui/TouchControls';
 
 const LEFT_KEYS = ['ArrowLeft', 'KeyA'];
 const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
+const GAS_KEYS = ['ArrowUp', 'KeyW'];
+const BRAKE_KEYS = ['ArrowDown', 'KeyS'];
+const TAP_KEYS = ['Space', 'Enter'];
 
 /**
- * InputController — collapses keyboard and touch into one steering axis.
+ * InputController — collapses keyboard and the on-screen buttons into two axes.
  *
- * `axis` is -1 (full left) … 0 … +1 (full right), sampled by the car each
- * frame rather than pushed by events, so a held key and a held finger behave
- * identically and neither can miss a frame.
+ * `axis` is -1 (full left) … +1 (full right); `throttle` is +1 gas, -1 brake, 0
+ * coasting. Both are SAMPLED each frame rather than pushed by events, so a held
+ * key and a held button behave identically and neither can miss a frame.
  *
  * Keyboard goes through the `inputListener` singleton because KEY_DOWN/KEY_UP
  * are NOT spatial events — `node.on(Input.KEY_DOWN, ...)` routes to the node's
  * own emitter and would never fire. See ARCHITECTURE.md §3 item 11.
  *
- * Touch uses global (target-less) pointer listeners rather than two hit-tested
- * button nodes: hold-to-steer wants the whole screen half live, including
- * whatever the finger slides over. Phase 6 can add visible button art on top
- * without changing any of this.
+ * Touch comes from `TouchControls`. This used to split the screen in half for
+ * steering, which was fine for one axis and impossible for two — four controls
+ * need four targets.
  */
 export class InputController {
 
-    /** -1 … +1. Read by PlayerCar every frame. */
+    /** -1 … +1 steering. Read by PlayerCar every frame. */
     axis = 0;
+
+    /** +1 gas, -1 brake, 0 coasting. Read by GameState every frame. */
+    throttle = 0;
 
     /** Set once the player has actually steered — used to hide the hint. */
     hasSteered = false;
 
-    private _touchAxis = 0;
-    private _pointerCount = 0;
+    private _controls: TouchControls;
     /** A press that hasn't been consumed yet — drives the restart prompt. */
     private _tapPending = false;
 
+    constructor(controls: TouchControls) {
+        this._controls = controls;
+    }
+
     attach(): void {
+        // Target-less, so a press ANYWHERE counts as the restart tap. Steering
+        // and throttle come from the buttons, not from this.
         inputListener.on(Input.POINTER_DOWN, this._onDown, null, this);
-        inputListener.on(Input.POINTER_MOVE, this._onMove, null, this);
-        inputListener.on(Input.POINTER_UP, this._onUp, null, this);
-        inputListener.on(Input.POINTER_CANCEL, this._onUp, null, this);
     }
 
     detach(): void {
-        // `off`'s third arg is the TARGET node, not the context — these were
+        // `off`'s third arg is the TARGET node, not the context — this was
         // registered target-less, so it stays null. Matching is by callback
         // reference, which prototype methods give us for free.
         inputListener.off(Input.POINTER_DOWN, this._onDown, null);
-        inputListener.off(Input.POINTER_MOVE, this._onMove, null);
-        inputListener.off(Input.POINTER_UP, this._onUp, null);
-        inputListener.off(Input.POINTER_CANCEL, this._onUp, null);
+        this._controls.detach();
     }
 
     /**
@@ -60,53 +66,49 @@ export class InputController {
     }
 
     /**
-     * Discards any in-progress hold, so a finger still down from the previous
-     * screen doesn't immediately steer. The pointer count goes to zero while the
-     * finger is physically down; the release clamps rather than going negative,
-     * and steering resumes on the next real press.
+     * Drops every hold, so a finger still down from the restart tap doesn't
+     * immediately steer or accelerate. Buttons re-arm on the next real press.
      */
     clearHold(): void {
-        this._touchAxis = 0;
-        this._pointerCount = 0;
+        this._controls.clear();
+        this.axis = 0;
+        this.throttle = 0;
     }
 
-    /** Call once per frame, before the car reads `axis`. */
+    /** Call once per frame, before anything reads `axis` or `throttle`. */
     sample(): void {
-        let keyAxis = 0;
-        if (inputListener.isKeyDown('Space') || inputListener.isKeyDown('Enter')) this._tapPending = true;
-        if (LEFT_KEYS.some(k => inputListener.isKeyDown(k))) keyAxis -= 1;
-        if (RIGHT_KEYS.some(k => inputListener.isKeyDown(k))) keyAxis += 1;
+        if (TAP_KEYS.some(k => inputListener.isKeyDown(k))) this._tapPending = true;
 
-        // Keyboard wins while a key is held; otherwise touch. Neither is
-        // normally present at the same time, and this keeps a stuck touch from
-        // fighting the keyboard during desktop testing.
-        this.axis = keyAxis !== 0 ? keyAxis : this._touchAxis;
+        // Keyboard wins while a key is held; otherwise the buttons. They're
+        // rarely both present, and this keeps a stuck button from fighting the
+        // keyboard during desktop testing.
+        this.axis = InputController._pick(
+            this._held(LEFT_KEYS, RIGHT_KEYS),
+            (this._controls.isHeld(Control.STEER_RIGHT) ? 1 : 0)
+            - (this._controls.isHeld(Control.STEER_LEFT) ? 1 : 0),
+        );
         if (this.axis !== 0) this.hasSteered = true;
+
+        this.throttle = InputController._pick(
+            this._held(BRAKE_KEYS, GAS_KEYS),
+            (this._controls.isHeld(Control.GAS) ? 1 : 0)
+            - (this._controls.isHeld(Control.BRAKE) ? 1 : 0),
+        );
     }
 
-    /**
-     * Which half of the screen a pointer is in. Compared against the LIVE
-     * design width, not the configured 720: the policy is FIXED_HEIGHT, so the
-     * real design width varies with the device's aspect ratio.
-     */
-    private _axisFor(x: number): number {
-        const width = inputListener.engine?.display?.designWidth ?? 720;
-        return x < width / 2 ? -1 : 1;
+    /** -1 if any `negative` key is down, +1 for `positive`, 0 for neither/both. */
+    private _held(negative: string[], positive: string[]): number {
+        let v = 0;
+        if (negative.some(k => inputListener.isKeyDown(k))) v -= 1;
+        if (positive.some(k => inputListener.isKeyDown(k))) v += 1;
+        return v;
     }
 
-    private _onDown(e: { x: number }): void {
-        this._pointerCount++;
-        this._touchAxis = this._axisFor(e.x);
+    private static _pick(keyboard: number, touch: number): number {
+        return keyboard !== 0 ? keyboard : touch;
+    }
+
+    private _onDown(): void {
         this._tapPending = true;
-    }
-
-    private _onMove(e: { x: number }): void {
-        // Sliding across the midpoint switches direction without lifting.
-        if (this._pointerCount > 0) this._touchAxis = this._axisFor(e.x);
-    }
-
-    private _onUp(): void {
-        this._pointerCount = Math.max(0, this._pointerCount - 1);
-        if (this._pointerCount === 0) this._touchAxis = 0;
     }
 }
