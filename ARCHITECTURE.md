@@ -462,6 +462,17 @@ left 14% showing at a 160m edge, which is plainly visible pop-in. The pair that
 satisfies both is **0.007 with a 280m edge** (`chunksAhead: 7`). Change either
 and re-derive the other.
 
+**Fog cannot hide anything on its own.** It blends a surface toward the fog
+colour; whether that makes the surface *disappear* depends entirely on what is
+behind it. Distant trees sit only 2.9-6.7° above the horizon and mountains
+8-18°, and at those elevations the sky gradient is already 16-36% of the way to
+the deep blue zenith — so fully-fogged geometry still read as pale shapes against
+a bluer sky. The fix is a **haze band** (`sky.hazeHeight`): force the low sky to
+exactly the derived fog colour, fading into the gradient above. Raising the
+gradient exponent works too, but this camera only ever sees 6-25° of sky, so that
+pales out all of it and loses the colour. Set the band to cover the trees and the
+BASE of the mountains, so ranges fade at the bottom and stay visible at the top.
+
 Pushing the draw edge out does **not** raise the chunk build rate — that's
 `speed / chunkSize`, about 10 chunks/second at top speed, independent of how far
 ahead they sit. It costs resident memory and triangles only (54 chunks ≈ 41k

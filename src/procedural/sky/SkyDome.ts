@@ -2,40 +2,38 @@ import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
 
 /**
- * SkyDome — a big inverted sphere with an analytic gradient and noise clouds.
+ * SkyDome — a large inverted sphere with an analytic gradient, a sun glow and a
+ * horizon haze band.
  *
- * Ported from `Procedural_3D_world/src/sky/skyDome.js`, with its CPU-side cloud
- * sampling dropped: that existed so sunlight could dim when the sun sat behind a
- * cloud, which needed a second JS copy of the noise field. Not worth the bytes
- * or the frame time here.
+ * Ported from Procedural_3D_world's `src/sky/skyDome.js`, reduced to the
+ * gradient and glow. Both of its cloud implementations are gone: the shader's
+ * per-pixel noise field (measured at 7.7ms a frame, ~14ms on a low-end phone,
+ * paid across the whole upper sky whether a cloud was there or not) and the
+ * CPU-side mirror of it that dimmed sunlight behind clouds. Clouds are
+ * billboards now — see `CloudSprites`.
  *
- * Costs one draw call and no textures — the gradient, sun glow and clouds are
- * all computed per-pixel, which is why a procedural sky is the right call
- * against a 2MB budget where a cubemap would be hundreds of kilobytes.
+ * What remains is a handful of ALU per pixel, which measured as very nearly
+ * free. That's why a procedural sky is the right call against a 2MB budget where
+ * a cubemap would cost hundreds of kilobytes.
  *
- * Two properties matter for it to sit correctly in this game:
+ * Three properties make it sit correctly in this game:
  *
- *  - `fog: false`. The scene's FogExp2 would otherwise wash the dome toward the
- *    fog colour, flattening the whole gradient. Instead, `sky.horizonColor` and
- *    `world.fogColor` are set to the same value in config, so distant terrain
- *    fades into the dome's horizon rather than into an unrelated flat colour.
- *  - `depthWrite: false` with a high `renderOrder`, so it draws LAST and is
- *    depth-tested against everything already in the buffer. Only pixels where
- *    no geometry was drawn end up shading. Drawing it first instead (the usual
- *    skybox trick) means paying 4 fbm evaluations — 16 simplex3D — on every
- *    pixel of the screen including the ~60% that terrain and road then paint
- *    over. The cost of doing it this way is that the dome must ENCLOSE all
- *    geometry: see `sky.domeRadius` and `camera.far`.
- */
-/**
- * The horizon colour the shader will actually produce for the configured sun.
- *
- * The shader mixes `horizonSunsetColor` toward `horizonColor` by the sun's
- * height, so the visible horizon is neither config value at most sun angles.
- * Scene fog and background are derived from THIS rather than hand-matched to a
- * config colour — hand-matching agrees at exactly one sun elevation and shows a
- * seam at every other, which is what a first pass looked like: pale blue haze
- * against a pink sky.
+ *  - **`fog: false`.** The scene's FogExp2 would otherwise wash the dome toward
+ *    the fog colour and flatten the gradient. Instead the scene's fog is DERIVED
+ *    from this dome's own horizon (`effectiveHorizonColor`), so the two agree by
+ *    construction at any sun angle rather than by a hand-matched constant.
+ *  - **The haze band.** Fog only blends a surface toward the fog colour — it
+ *    cannot HIDE anything unless the background behind it is that colour too.
+ *    Distant trees sit a few degrees above the horizon, where the plain gradient
+ *    is already well on its way to the deep blue zenith, so fully-fogged
+ *    geometry still read as pale shapes. Forcing the low sky to exactly the fog
+ *    colour is what makes distance actually occlude. See `sky.hazeHeight`.
+ *  - **`depthWrite: false` with a high `renderOrder`**, so it draws LAST and is
+ *    depth-tested against everything already in the buffer: only pixels with no
+ *    geometry in front of them shade. Drawing it first (the usual skybox trick)
+ *    pays full fragment cost for the ~60% of the screen terrain then paints
+ *    over. The price is that the dome must ENCLOSE all geometry — see
+ *    `sky.domeRadius` and `camera.far`.
  */
 export function effectiveHorizonColor(): THREE.Color {
     const d = cfg.lighting.sunDirection;
@@ -63,6 +61,8 @@ export class SkyDome {
                 uHorizonSunsetColor: { value: new THREE.Color(s.horizonSunsetColor) },
                 uSunGlowColor: { value: new THREE.Color(s.sunGlowColor) },
                 uSunDirection: { value: new THREE.Vector3(sun.x, sun.y, sun.z).normalize() },
+                uHazeHeight: { value: s.hazeHeight },
+                uHazeStrength: { value: s.hazeStrength },
             },
             side: THREE.BackSide,
             depthWrite: false,
@@ -109,6 +109,8 @@ uniform vec3 uHorizonColor;
 uniform vec3 uHorizonSunsetColor;
 uniform vec3 uSunGlowColor;
 uniform vec3 uSunDirection;
+uniform float uHazeHeight;
+uniform float uHazeStrength;
 
 void main() {
     vec3 dir = normalize(vLocalPosition);
@@ -125,6 +127,14 @@ void main() {
     // Below eye level, fade to a duller horizon rather than cutting off at h=0.
     float below = pow(clamp(-h, 0.0, 1.0), 0.5);
     sky = mix(sky, horizon * 0.6, below);
+
+    // Haze band. The 'horizon' value here is exactly the colour the scene's fog
+    // blends toward (see effectiveHorizonColor), so flattening the low sky to it
+    // is what gives fogged geometry nothing to stand out against. Applied BEFORE
+    // the sun glow, so a low sun still burns through the haze.
+    // (No backticks in here -- this is inside a template literal.)
+    float haze = 1.0 - smoothstep(0.0, uHazeHeight, max(h, 0.0));
+    sky = mix(sky, horizon, haze * uHazeStrength);
 
     float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
     sky += uSunGlowColor * (pow(sunDot, 84.0) * 0.5 + pow(sunDot, 1820.0) * 2.0);

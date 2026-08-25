@@ -831,6 +831,28 @@ export const gameConfig = {
         horizonSunsetColor: 0xef8f52,
         sunGlowColor: 0xfff2c8,
         /**
+         * Haze band: the bottom slice of sky is forced to exactly the fog
+         * colour, fading into the normal gradient above.
+         *
+         * This is what actually makes fog HIDE things. Fog only blends a surface
+         * toward the fog colour — it cannot hide anything unless the background
+         * behind it is that same colour. Distant trees sit 2.9-6.7° above the
+         * horizon and mountains 8-18°, where the plain gradient is already
+         * 16-36% of the way to the deep blue zenith, so a 98%-fogged object was
+         * still a pale shape against a bluer sky.
+         *
+         * Raising the gradient exponent would also work but pales the ENTIRE
+         * visible sky (6-25° is all this camera ever sees) and loses the vivid
+         * blue. A band leaves everything above it untouched.
+         *
+         * `hazeHeight` is in sin(elevation): 0.20 ≈ 11.5°, which fully covers
+         * the trees and the base of the mountains — so ranges fade out at the
+         * bottom and stay visible at the top, which is how distant ranges
+         * actually look.
+         */
+        hazeHeight: 0.20,
+        hazeStrength: 1,
+        /**
          * Clouds as camera-pinned billboards, not as shader noise.
          *
          * The first version computed a 3D noise field per pixel in the sky
