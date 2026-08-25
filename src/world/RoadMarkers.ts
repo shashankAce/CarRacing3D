@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Node, InstancedMesh3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
+import { roadCenterX, roadLevelAt, roadHeadingAt, roadPitchAt } from './roadPath';
+import { heightAt } from '../procedural/heightField';
 import type { WorldScroll } from './WorldScroll';
 
 /**
@@ -22,7 +24,13 @@ export class RoadMarkers {
     private _dashes: InstancedMesh3D;
     private _posts: InstancedMesh3D;
     private _scroll: WorldScroll;
+    // Scratch objects, reused for every instance every frame — this runs
+    // `dash.count + post.count * 2` times per frame and must not allocate.
     private _matrix = new THREE.Matrix4();
+    private _position = new THREE.Vector3();
+    private _euler = new THREE.Euler();
+    private _quaternion = new THREE.Quaternion();
+    private _scale = new THREE.Vector3(1, 1, 1);
 
     constructor(scene: Scene, scroll: WorldScroll) {
         this._scroll = scroll;
@@ -58,24 +66,47 @@ export class RoadMarkers {
         return mesh;
     }
 
-    /** Call once per frame, after GameState has advanced the scroll. */
+    /**
+     * Call once per frame, after GameState has advanced the scroll.
+     *
+     * Both sets follow `roadCenterX(worldZ)` rather than assuming x=0, so they
+     * track a curving road.
+     *
+     * The dashes additionally take the road's heading and grade, because a dash
+     * is 3m long: position alone leaves an axis-aligned box cutting across a
+     * bend and burying its ends on a slope. The posts need neither — they're
+     * ~0.18m square, so rotation is invisible on them, and a real roadside post
+     * stands vertical regardless of the ground. They do sample the height field
+     * for their base, since they stand on the shoulder rather than on the flat
+     * road corridor.
+     */
     update(): void {
         const ahead = cfg.markers.aheadFraction;
+        const travelled = this._scroll.travelled;
 
         const d = cfg.markers.dash;
+        const dashLift = cfg.roadSurface.lift + 0.01;
         for (let i = 0; i < d.count; i++) {
             const z = this._scroll.repeatingZ(i, d.spacing, d.count, ahead);
-            this._matrix.makeTranslation(0, 0.03, z);
+            const worldZ = travelled - z;
+            this._position.set(roadCenterX(worldZ), roadLevelAt(worldZ) + dashLift, z);
+            this._euler.set(roadPitchAt(worldZ, d.length), roadHeadingAt(worldZ), 0);
+            this._quaternion.setFromEuler(this._euler);
+            this._matrix.compose(this._position, this._quaternion, this._scale);
             this._dashes.object3D.setMatrixAt(i, this._matrix);
         }
         this._dashes.object3D.instanceMatrix.needsUpdate = true;
 
         const p = cfg.markers.post;
-        const postX = cfg.road.halfWidth + p.offset;
+        const offset = cfg.road.halfWidth + p.offset;
         for (let i = 0; i < p.count; i++) {
             const z = this._scroll.repeatingZ(i, p.spacing, p.count, ahead);
+            const worldZ = travelled - z;
+            const centre = roadCenterX(worldZ);
             for (let side = 0; side < 2; side++) {
-                this._matrix.makeTranslation(side === 0 ? -postX : postX, p.height / 2, z);
+                const x = centre + (side === 0 ? -offset : offset);
+                const base = heightAt(x, worldZ);
+                this._matrix.makeTranslation(x, base + p.height / 2, z);
                 this._posts.object3D.setMatrixAt(i * 2 + side, this._matrix);
             }
         }

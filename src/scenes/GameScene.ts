@@ -6,14 +6,17 @@ import { InputController } from '../game/InputController';
 import { PlayerCar } from '../game/PlayerCar';
 import { FollowCamera } from '../game/FollowCamera';
 import { RoadMarkers } from '../world/RoadMarkers';
+import { TerrainStreamer } from '../world/TerrainStreamer';
+import { RoadMesh } from '../world/RoadMesh';
 import { Hud } from '../ui/Hud';
 
 /**
- * GameScene — Phase 2: the core loop.
+ * GameScene — Phase 3: infinite scroll.
  *
- * Steering, the follow camera, the speed ramp and the scrolling world are all
- * live. Still placeholder: a flat infinite ground plane instead of streamed
- * terrain (Phase 3), and no traffic (Phase 4).
+ * Steering, the follow camera, the speed ramp, streamed terrain and the
+ * streamed road ribbon are all live. Still to come: traffic (Phase 4) and the
+ * real procedural terrain field, scatter and LOD (Phase 5/6) — the height
+ * field's ambient hills are a cheap placeholder for now.
  *
  * The car never moves forward. It sits at the origin steering on X while the
  * world scrolls past — see WorldScroll and ARCHITECTURE.md §5.1.
@@ -33,6 +36,8 @@ export class GameScene extends Scene {
     private _car: PlayerCar;
     private _camera: FollowCamera;
     private _markers: RoadMarkers;
+    private _terrain: TerrainStreamer;
+    private _road: RoadMesh;
     private _hud: Hud;
 
     onLoad(): void {
@@ -52,7 +57,6 @@ export class GameScene extends Scene {
         };
 
         this._buildLights();
-        this._buildGround(sys);
 
         this._state = new GameState();
         this._input = new InputController();
@@ -61,6 +65,18 @@ export class GameScene extends Scene {
         this._car = new PlayerCar(this);
         this._camera = new FollowCamera(this);
         this._camera.snapTo(this._car);
+
+        // The streamers own plain THREE meshes rather than wrapper components:
+        // they're created once, recycled forever, and never enter or leave the
+        // scene, so there's no Node lifecycle for a wrapper to manage.
+        this._terrain = new TerrainStreamer(sys.scene, this._state.scroll);
+        this._road = new RoadMesh(sys.scene, this._state.scroll);
+        // The player must never watch the world assemble itself, so the opening
+        // window is built in full before the first frame rather than one chunk
+        // at a time.
+        this._terrain.buildAllNow();
+        this._road.update();
+
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._hud = new Hud(this);
     }
@@ -83,45 +99,6 @@ export class GameScene extends Scene {
     }
 
     /**
-     * Placeholder flat world: a ground plane, a road surface and two painted
-     * edge lines. All static and never toggled, so they're plain THREE meshes
-     * added straight to the scene — a wrapper's whole purpose is add/remove/
-     * dispose on the Node lifecycle, and there is none to manage here.
-     *
-     * These don't scroll, and don't need to: they're uniform along Z, so the
-     * dashes and posts in RoadMarkers are what convey motion. Phase 3 replaces
-     * all of it with streamed terrain chunks and a recycled road strip.
-     */
-    private _buildGround(sys: any): void {
-        const size = cfg.world.groundSize;
-
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(size, size),
-            new THREE.MeshStandardMaterial({ color: cfg.colors.ground, roughness: 0.95 }),
-        );
-        ground.rotation.x = -Math.PI / 2;
-        sys.scene.add(ground);
-
-        // Lifted a hair above the ground rather than sharing its exact Y —
-        // coplanar surfaces z-fight.
-        const road = new THREE.Mesh(
-            new THREE.PlaneGeometry(cfg.road.halfWidth * 2, size),
-            new THREE.MeshStandardMaterial({ color: cfg.colors.road, roughness: 0.9 }),
-        );
-        road.rotation.x = -Math.PI / 2;
-        road.position.y = 0.01;
-        sys.scene.add(road);
-
-        const lineMat = new THREE.MeshStandardMaterial({ color: cfg.colors.roadLine, roughness: 0.8 });
-        for (const side of [-1, 1]) {
-            const line = new THREE.Mesh(new THREE.PlaneGeometry(cfg.road.lineWidth, size), lineMat);
-            line.rotation.x = -Math.PI / 2;
-            line.position.set(side * (cfg.road.halfWidth - cfg.road.lineWidth), 0.02, 0);
-            sys.scene.add(line);
-        }
-    }
-
-    /**
      * Fixed update order. Input is sampled before the car reads it, and the
      * scroll is advanced before anything positions itself against it — so
      * nothing in a frame is ever reading last frame's state.
@@ -129,7 +106,12 @@ export class GameScene extends Scene {
     update(dt: number): void {
         this._input.sample();
         this._state.update(dt);
-        this._car.update(dt, this._input.axis);
+        // The car's world Z is `travelled` — it always renders at z ≈ 0.
+        this._car.update(dt, this._input.axis, this._state.scroll.travelled, this._state.speed);
+        // World geometry follows the scroll before the camera reads the car, so
+        // nothing is ever a frame behind what the player is looking at.
+        this._terrain.update();
+        this._road.update();
         this._markers.update();
         this._camera.update(dt, this._car, this._state.speedT);
         this._hud.update(this._state, this._input.hasSteered);

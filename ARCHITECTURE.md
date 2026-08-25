@@ -318,11 +318,76 @@ Steering integrates a lateral velocity with clamping to the road edges, plus a
 small visual roll/yaw on the car body for feel. Not instant lane snapping unless
 D2 (§6) says otherwise.
 
+### 5.7a The mistake that recurred three times: frequency vs. visible distance
+
+Every procedural field in this game is sampled over a *bounded* view — roughly
+150-280m of visible ground. A sine or noise term whose **wavelength (2π/frequency)
+exceeds that distance cannot be perceived as shape**; you see a fraction of one
+wave, which reads as a flat tilt. This was got wrong three separate times:
+
+| what | first frequency | wavelength | vs. visible | symptom |
+|---|---|---|---|---|
+| terrain hills | 0.016 | 393m | ~150m | "a plane with a tint" |
+| road curve | 0.004 | 1571m | ~200m | "the road is still straight" |
+| road elevation | 0.008 | 785m | ~200m | 1.7m of rise — invisible |
+
+**Before committing any frequency, compute `2π/f` and compare it to
+`terrain.chunkSize * terrain.chunksAhead`.** Aim for a wavelength of roughly a
+third to a half of that, and check the resulting amplitude *across* the visible
+span, not in the abstract.
+
+The same trap has a second face: a single low-frequency octave has slope
+`amplitude × frequency`, which for hills big enough to see is far too gentle to
+ever trigger a slope-based colour band. That's why `ambientHeightAt` is
+multi-octave — the small high-frequency octave is what creates slope, and
+therefore what makes terrain read as ground rather than as a tinted surface.
+
+### 5.7b Two mesh layers, one surface: the traps
+
+Terrain and road are separate meshes covering overlapping ground, which creates
+two failure modes that both showed up in play:
+
+1. **The road ribbon sits `roadSurface.lift` (2cm) above the terrain corridor**,
+   to stop the two z-fighting. So anything positioned with `heightAt` sits 2cm
+   *inside* the visible road — a constant sink that reads from a chase camera as
+   the body's underside cutting into the asphalt. Anything that drives must use
+   **`surfaceHeightAt`** (top of asphalt inside the corridor, terrain outside),
+   never `heightAt`.
+2. **The flattened corridor must be wider than the asphalt** by more than one
+   terrain vertex spacing. Terrain is a triangle mesh on a `chunkSize /
+   (resolution-1)` grid; if the shoulder starts rising exactly at
+   `road.halfWidth`, a triangle can have one vertex inside the corridor and the
+   next already lifted, and linear interpolation carries the ground **up to 84cm
+   above the asphalt**, swallowing the road edge in a staircase. `FLAT_MARGIN` in
+   `heightField.ts` handles this, derived from the grid rather than hardcoded.
+
 ### 5.8 Fog is a feature, not decoration
 An exponential fog matched to the sky/background color lets the far plane and
 the chunk spawn boundary sit close in without a visible pop-in edge. It's the
 cheapest way to buy back a shorter draw distance. `sys.scene.fog = new
 THREE.FogExp2(...)` — no wrapper needed (per `skills/3d/three-integration.md`).
+
+**`world.fogDensity` and `terrain.chunksAhead` are one decision, not two.**
+FogExp2 hides `1 - exp(-(density·dist)²)` of a surface's colour, and the two
+settings pull opposite ways:
+
+- Fog must be **thick at the spawn edge** (≥~98% hidden) or chunks visibly pop
+  into view as you drive.
+- Fog must be **thin nearer in** (≤~30% at 80m) or every terrain colour washes
+  to sky and the world looks pale and flat.
+
+Both halves were got wrong in turn: density 0.010 with a 200m edge hid the
+boundary but washed out 76% of the colour at 120m (and made the rock band look
+like it wasn't being generated at all); dropping to 0.007 fixed the colour but
+left 14% showing at a 160m edge, which is plainly visible pop-in. The pair that
+satisfies both is **0.007 with a 280m edge** (`chunksAhead: 7`). Change either
+and re-derive the other.
+
+Pushing the draw edge out does **not** raise the chunk build rate — that's
+`speed / chunkSize`, about 10 chunks/second at top speed, independent of how far
+ahead they sit. It costs resident memory and triangles only (54 chunks ≈ 41k
+triangles, 0.8MB of typed arrays), and the lateral column count has to grow with
+it: portrait's horizontal FOV is only ~42°, so the view is ±106m wide at 280m.
 
 ### 5.9 Shadows: default OFF
 Real-time shadow maps are the most expensive thing we could switch on for the
@@ -341,6 +406,8 @@ not assumptions to revisit.
 | D2 | Discrete lane snapping vs free lateral steering? | **Free lateral steering** with clamping to the road edges, plus a visual roll on the car. Traffic still spawns on lane centres. |
 | D3 | How rich are the trees? | **Port, then measure.** Start with P3W's generator at its cheap `ringDetail: 0.4` tier and a **3-variant** pool, and measure both boot-time generation cost and frame cost. If either is material, fall back to a simple cone/sphere tree — at this camera distance the full skeleton may be invisible detail we're paying full price for. |
 | D4 | Portrait 720×1280? | **Yes** — matches the existing scaffold and `pack:google-playables --orientation=portrait`. |
+| D5 | Does the car follow a curving road on its own? | **No.** Settled 2026-08-25 after trying both. The car's lateral position is ABSOLUTE and only steering moves it; the clamp to the asphalt is what tracks the curve. So holding a bend takes input, and reaching an edge is a collision that shoves the car along it. Storing the car's position as an offset from the road centre was tried and rejected — it carried the car through bends with no input, making the curve decoration. |
+| D6 | Can the car leave the road? | **No** — it clamps at the asphalt edge. But it rides `surfaceHeightAt` and has real suspension, so the code already behaves correctly if that ever changes. |
 
 ## 7. Implementation plan
 
@@ -488,3 +555,33 @@ src/
   Replaced the speed-based pull-back (which *reduces* the sensation) with
   `fovSpeedGain: 8`. **Camera height and marker spacing are the two strongest
   perceived-speed levers — reach for those before raising m/s.**
+- **2026-08-25** — **Phase 3 done.** Infinite scroll, streamed and generated at
+  runtime (nothing baked — baking would cost bytes the 2MB budget doesn't have).
+  New: `src/world/roadPath.ts` (`roadCenterX`/`roadLevelAt`/`roadHeadingAt`/
+  `roadPitchAt` — the single definition of where the road is, how high, and which
+  way it points, read by the height field, the ribbon, the markers and the car),
+  `src/procedural/{math,heightField,terrainColor,chunkMesh}.ts`,
+  `src/world/TerrainStreamer.ts` (fixed 54-slot pool, buffers rewritten on
+  recycle, one build per frame, nearest-first), `src/world/RoadMesh.ts` (asphalt
+  as recycled 20m bands, three vertex-coloured strips per band in one draw call).
+  The flat placeholder ground is gone. `PlayerCar` rewritten: absolute lateral
+  position (D5), five-point ground sampling, suspension damping on height/pitch/
+  roll, footprint-based no-penetration height, wheels.
+  Allocation churn from §4.2 fixed at the port, not after: `normalAt` and
+  `terrainColorAt` write into scratch objects, and nothing in the per-frame path
+  allocates.
+  `tsc --noEmit` clean. Pack size **934.7KB / 2MB**.
+
+  Findings promoted into this document because they cost real time and will
+  recur: §5.7a (wavelength must be well under the visible distance — got wrong
+  three times, and a single low-frequency octave can't produce slope), §5.7b (the
+  2cm asphalt layer, and why the flat corridor must exceed the asphalt by a
+  vertex spacing), §5.8 (fog density and draw distance are one coupled decision).
+
+  Also: `debug.showSlopeBands` was added and earned its keep — a screenshot with
+  it on settled in one look that the rock band was being generated correctly and
+  that fog was what made it look absent. Terrain colour bands are tuned to the
+  PLACEHOLDER hills; Phase 5's ridged mountains will need them re-derived.
+  Flagged, not done: the four wheel meshes are barely visible from a chase camera
+  and are a cheap optimisation target (see the note in `PlayerCar._buildWheels`);
+  traffic must not copy that pattern.
