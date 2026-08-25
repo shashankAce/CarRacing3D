@@ -16,7 +16,7 @@ const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
  *
  * Touch uses global (target-less) pointer listeners rather than two hit-tested
  * button nodes: hold-to-steer wants the whole screen half live, including
- * whatever the finger slides over. Phase 5 can add visible button art on top
+ * whatever the finger slides over. Phase 6 can add visible button art on top
  * without changing any of this.
  */
 export class InputController {

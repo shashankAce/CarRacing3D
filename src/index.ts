@@ -5,12 +5,12 @@ import { GameScene } from './scenes/GameScene';
 
 /**
  * Entry point. See ARCHITECTURE.md for the design, the verified engine
- * constraints, and the phase plan. Currently at Phase 0 — 3D boot.
+ * constraints, and the phase plan. Currently at Phase 1 — 3D boot.
  */
 
 // Host-platform wrapper. Never branch on `platform.name`; the one capability
 // worth branching on is `platform.isAdCreative` (a creative needs a CTA
-// button, a hosted game must not show one) — that lands in Phase 5.
+// button, a hosted game must not show one) — that lands in Phase 6.
 const platform = createPlatform();
 await platform.initialize();  // must be awaited BEFORE constructing GameEngine
 
@@ -30,6 +30,6 @@ engine.runScene(new GameScene());
 engine.start();
 
 // Nothing to preload yet — the world is generated, not loaded. Once there is a
-// real generation step (Phase 4), drive `platform.reportProgress()` from it and
+// real generation step (Phase 5), drive `platform.reportProgress()` from it and
 // move this call to when the game is genuinely playable.
 platform.notifyReady();

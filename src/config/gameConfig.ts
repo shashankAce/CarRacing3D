@@ -80,7 +80,7 @@ export const gameConfig = {
     /**
      * Scrolling road markers. On a flat placeholder world these are the only
      * thing that conveys motion, and they exercise the world-scroll maths that
-     * Phase 2's terrain streamer will reuse.
+     * Phase 3's terrain streamer will reuse.
      *
      * Each set wraps with a modulo over `spacing * count`, so `count` sets both
      * the draw distance and the recycle period — no pooling bookkeeping.
@@ -173,7 +173,7 @@ export const gameConfig = {
     },
 
     world: {
-        /** Placeholder flat ground extent (Phase 0 only — replaced by streamed chunks in Phase 2). */
+        /** Placeholder flat ground extent (Phase 1 only — replaced by streamed chunks in Phase 3). */
         groundSize: 400,
         /** THREE.FogExp2 density. Tuned against `camera.far` to hide the far plane (§5.8). */
         fogDensity: 0.006,

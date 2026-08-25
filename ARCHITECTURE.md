@@ -62,7 +62,7 @@ Consequences that shape every decision below:
 
 That is an entire procedural world in ~1/3 of our budget.
 
-**Measured on this project (Phase 0, 2026-08-25)** — `npm run pack:meta-playables`
+**Measured on this project (Phase 1, 2026-08-25)** — `npm run pack:meta-playables`
 on a scene with a camera, two lights, fog, a ground plane, a road strip and a
 box car:
 
@@ -73,7 +73,7 @@ build-meta-playables.html   917.9 KB / 2 MB limit   (1 file / 1 limit)
 The floor is **~918KB, leaving ~1.08MB of headroom** before any content exists.
 Cross-checked against the reference above: all of P3W's *non*-three.js code —
 terrain, river, water shaders, trees, grass, rocks — is only ~100KB of the 655KB
-it ships, so Phase 4's port should cost well under 100KB.
+it ships, so Phase 5's port should cost well under 100KB.
 
 **Size is not the binding constraint on this project — runtime performance is.**
 Do not spend time on byte-golfing before there is something to measure.
@@ -344,45 +344,49 @@ not assumptions to revisit.
 
 ## 7. Implementation plan
 
+**These numbers match the git history** — one commit per phase, message prefixed
+`Phase N complete`. Keep them aligned; if a phase gets split or reordered,
+renumber here and in the code comments that reference a phase, in the same pass.
+
 Each phase ends in something runnable in the browser (`npm run dev`, port 8000)
 — there is no test runner in this project, so "verify by running it" is the only
 verification that exists.
 
-**Phase 0 — 3D boot + size floor.**
+**Phase 1 — 3D boot + size floor.**
 `enable3D`/`three` in the engine config, `pixelRatio: 2`, a `MainScene` with
 `Camera3D` + lights + a flat ground plane + a colored box car. Then **immediately
 run `npm run pack:meta-playables`** and record the byte count in this file. This
 establishes the real floor before any content exists, so every later phase can be
 attributed. *Do not skip this — it's the cheapest size information we will ever get.*
 
-**Phase 1 — the core loop feels right.**
+**Phase 2 — the core loop feels right.**
 Input (keyboard + touch), lateral steering with clamping, TPP follow camera with
 exponential damping, speed ramp to a cap, `travelled` counter, 2D HUD showing
 speed/distance. Ground can still be a single flat plane. **This phase decides
 whether the game is fun**; nothing after it is worth doing if the steering and
 camera don't feel good.
 
-**Phase 2 — infinite scroll.**
+**Phase 3 — infinite scroll.**
 `roadCenterX(z)`, the road strip mesh, recycled terrain chunks (flat-colored, no
 scatter yet), the one-chunk-per-frame build queue, fog. Verify: drive for several
 minutes with no hitching, no seams, no drift.
 
-**Phase 3 — traffic and the game loop.**
+**Phase 4 — traffic and the game loop.**
 Pooled traffic boxes, lane spawn logic scaled by speed, hand-rolled collision,
 crash → game over → restart, near-miss scoring.
 
-**Phase 4 — the procedural environment.**
+**Phase 5 — the procedural environment.**
 Port `noise` → `ambientHeight` → the road-carving `heightField` → `terrainColor`
 → `chunkMesh`. Then per-chunk scatter with road rejection, then rocks, then
 trees, then LOD. Fix the §4.2 allocation churn as part of the port, not after.
 
-**Phase 5 — playable polish.**
+**Phase 6 — playable polish.**
 CTA button gated on `platform.isAdCreative`, `platform.triggerCTA(storeUrl)`
 (never `window.open`), `platform.notifyReady()` moved to when the game is
 genuinely playable, `platform.isAudioEnabled()` (a hard YouTube cert rule),
 tutorial hand/arrow prompt, restart, juice (speed lines, camera shake, particles).
 
-**Phase 6 — perf + size pass.**
+**Phase 7 — perf + size pass.**
 Profile on a real mid-range phone. Tune `resolutionScale`, draw distance, scatter
 density, chunk resolution. Re-pack and confirm the 2MB budget.
 
@@ -442,7 +446,7 @@ src/
   terrain/scatter/vegetation/rock modules. Wrote this document. No game code
   written yet. D1-D4 confirmed by the project owner: meta-playables (2MB raw),
   free lateral steering, port-then-measure on the tree generator, portrait 720×1280.
-- **2026-08-25** — **Phase 0 done.** `src/index.ts` (engine config: `enable3D`,
+- **2026-08-25** — **Phase 1 done.** `src/index.ts` (engine config: `enable3D`,
   `three`, `pixelRatio: 2`, WebGL, portrait 720×1280 `FIXED_HEIGHT`),
   `src/config/gameConfig.ts` (the reskin surface + the axis convention), and
   `src/scenes/GameScene.ts` (camera, ambient + directional light, fog, flat
@@ -459,9 +463,9 @@ src/
   shader comment) and `xxxxxx.io` (the engine's version banner) get flagged as
   external URLs by the static scan; neither is a network call. Re-check before
   a real submission.
-- **2026-08-25** — **Phase 1 done.** The core loop is live and the game is
+- **2026-08-25** — **Phase 2 done.** The core loop is live and the game is
   playable: `src/world/WorldScroll.ts` (the `travelled` scalar, `renderZ()`, and
-  the `repeatingZ()` modulo wrap that Phase 2's streamer will reuse),
+  the `repeatingZ()` modulo wrap that Phase 3's streamer will reuse),
   `src/game/GameState.ts` (speed ramp to cap, distance),
   `src/game/InputController.ts` (keyboard + hold-to-steer screen halves,
   collapsed into one -1…+1 axis sampled per frame),
@@ -470,7 +474,7 @@ src/
   back with speed), `src/world/RoadMarkers.ts` (instanced centre dashes +
   roadside posts — the only motion cue on a flat world), `src/ui/Hud.ts`
   (distance, km/h, steering hint).
-  `tsc --noEmit` clean. Pack size **925.0KB / 2MB** (+7.1KB over Phase 0).
+  `tsc --noEmit` clean. Pack size **925.0KB / 2MB** (+7.1KB over Phase 1).
   Auto-trim correctly picked up `InstancedMesh3D`, `Input` and `inputListener`.
   Two more engine facts folded into §3 (items 13, 14): 2D design space is
   Y-DOWN with a width that varies under `FIXED_HEIGHT`, and the exact shape of

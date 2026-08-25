@@ -9,11 +9,11 @@ import { RoadMarkers } from '../world/RoadMarkers';
 import { Hud } from '../ui/Hud';
 
 /**
- * GameScene — Phase 1: the core loop.
+ * GameScene — Phase 2: the core loop.
  *
  * Steering, the follow camera, the speed ramp and the scrolling world are all
  * live. Still placeholder: a flat infinite ground plane instead of streamed
- * terrain (Phase 2), and no traffic (Phase 3).
+ * terrain (Phase 3), and no traffic (Phase 4).
  *
  * The car never moves forward. It sits at the origin steering on X while the
  * world scrolls past — see WorldScroll and ARCHITECTURE.md §5.1.
@@ -89,7 +89,7 @@ export class GameScene extends Scene {
      * dispose on the Node lifecycle, and there is none to manage here.
      *
      * These don't scroll, and don't need to: they're uniform along Z, so the
-     * dashes and posts in RoadMarkers are what convey motion. Phase 2 replaces
+     * dashes and posts in RoadMarkers are what convey motion. Phase 3 replaces
      * all of it with streamed terrain chunks and a recycled road strip.
      */
     private _buildGround(sys: any): void {

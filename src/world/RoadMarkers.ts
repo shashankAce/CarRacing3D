@@ -7,7 +7,7 @@ import type { WorldScroll } from './WorldScroll';
  * RoadMarkers — the scrolling centre-line dashes and roadside posts.
  *
  * On the flat placeholder world these are the only thing conveying motion, and
- * they're deliberately built the way the Phase 4 scatter fields will be: one
+ * they're deliberately built the way the Phase 5 scatter fields will be: one
  * InstancedMesh per prop type, matrices rewritten each frame.
  *
  * Two engine rules are load-bearing here (ARCHITECTURE.md §3, items 4 and 5):

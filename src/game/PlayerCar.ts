@@ -23,7 +23,7 @@ export class PlayerCar {
     get position(): THREE.Vector3 { return this._group.position; }
     get lateralSpeedT(): number { return this._vx / cfg.steering.maxLateralSpeed; }
 
-    /** Half-extents used for the lateral clamp and (Phase 3) collision. */
+    /** Half-extents used for the lateral clamp and (Phase 4) collision. */
     get halfWidth(): number { return cfg.car.width / 2; }
     get halfLength(): number { return cfg.car.length / 2; }
 
