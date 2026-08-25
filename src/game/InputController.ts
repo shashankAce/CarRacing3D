@@ -29,6 +29,8 @@ export class InputController {
 
     private _touchAxis = 0;
     private _pointerCount = 0;
+    /** A press that hasn't been consumed yet — drives the restart prompt. */
+    private _tapPending = false;
 
     attach(): void {
         inputListener.on(Input.POINTER_DOWN, this._onDown, null, this);
@@ -47,9 +49,31 @@ export class InputController {
         inputListener.off(Input.POINTER_CANCEL, this._onUp, null);
     }
 
+    /**
+     * A press has happened since the last call. Consumed, so one press can only
+     * trigger one action — otherwise a held finger restarts the run every frame.
+     */
+    consumeTap(): boolean {
+        const tapped = this._tapPending;
+        this._tapPending = false;
+        return tapped;
+    }
+
+    /**
+     * Discards any in-progress hold, so a finger still down from the previous
+     * screen doesn't immediately steer. The pointer count goes to zero while the
+     * finger is physically down; the release clamps rather than going negative,
+     * and steering resumes on the next real press.
+     */
+    clearHold(): void {
+        this._touchAxis = 0;
+        this._pointerCount = 0;
+    }
+
     /** Call once per frame, before the car reads `axis`. */
     sample(): void {
         let keyAxis = 0;
+        if (inputListener.isKeyDown('Space') || inputListener.isKeyDown('Enter')) this._tapPending = true;
         if (LEFT_KEYS.some(k => inputListener.isKeyDown(k))) keyAxis -= 1;
         if (RIGHT_KEYS.some(k => inputListener.isKeyDown(k))) keyAxis += 1;
 
@@ -73,6 +97,7 @@ export class InputController {
     private _onDown(e: { x: number }): void {
         this._pointerCount++;
         this._touchAxis = this._axisFor(e.x);
+        this._tapPending = true;
     }
 
     private _onMove(e: { x: number }): void {

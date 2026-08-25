@@ -204,6 +204,114 @@ export const gameConfig = {
     },
 
     /**
+     * Traffic. Vehicles travel the SAME direction as the player, slower, so the
+     * game is about weaving through and overtaking rather than head-on dodging.
+     *
+     * `laneCount` positions traffic only — the player still moves freely across
+     * the road (§6 D2) rather than snapping between lanes.
+     */
+    traffic: {
+        laneCount: 4,
+        /** Ceiling on live vehicles; the pool is allocated to exactly this. */
+        maxAlive: 16,
+        /**
+         * Where new vehicles appear, metres ahead of the player. Far enough that
+         * they emerge from the fog with time to react, and inside the terrain
+         * draw distance so they never hang in empty space.
+         */
+        spawnAhead: 210,
+        /** Recycled once this far behind the player. */
+        despawnBehind: 45,
+        /**
+         * Also recycled once this far AHEAD. Required, not symmetry for its own
+         * sake: any vehicle faster than the player recedes forever and, with
+         * only a behind-test, would hold its pool slot for the rest of the run
+         * until no new traffic could spawn at all. Every type below is slower
+         * than `speed.start`, so this should never fire — it's the backstop for
+         * a reskin that raises a traffic speed above the player's opening pace.
+         */
+        despawnAhead: 270,
+        /**
+         * Vehicles placed across the road at the start of a run, and the nearest
+         * one's distance. Without seeding, the first encounter is governed by
+         * closing speed from `spawnAhead`, which at the start of the ramp is
+         * ~26 seconds — longer than a whole run, so the player would see nothing
+         * to dodge. Seeded, the first cut lands around 129m, about 5 seconds in.
+         */
+        seedCount: 8,
+        seedMinAhead: 28,
+        /**
+         * Player-travel distance between spawn attempts, eased from the first
+         * value at `speed.start` to the second at `speed.max`. Shrinking it with
+         * speed is what makes the run get harder.
+         *
+         * Set from a simulation of ~160km per configuration with a greedy driver
+         * AI, counting crashes and — more importantly — crashes where NO lateral
+         * position on the road was safe:
+         *
+         *   62 -> 34 :  1.63 crashes/km, 3 unavoidable
+         *   78 -> 46 :  1.10 crashes/km, 0 unavoidable   <- here
+         *   95 -> 58 :  0.79 crashes/km, 0 unavoidable
+         *
+         * The tighter setting is fair 98.8% of the time, which is not good
+         * enough: in a playable ad an unavoidable death is the one thing that
+         * stops a player retrying. A run lasts roughly 900m here.
+         */
+        spawnGapSlow: 78,
+        spawnGapFast: 46,
+        /** A lane is unavailable if it holds a vehicle within this of the spawn point. */
+        minLaneGap: 34,
+        /**
+         * Lanes that must stay clear near a spawn, so a wall of traffic is much
+         * less likely to form.
+         *
+         * This alone cannot GUARANTEE it — vehicles travel at different speeds,
+         * so they rearrange into new formations long after spawning, and
+         * simulation found full-width walls forming at ~0.05/km with this guard
+         * in place. A dynamic guard (scan ahead, nudge one vehicle's speed to
+         * open a gap) was prototyped in simulation and dropped: at the spawn gap
+         * below there are ZERO unavoidable deaths across 160km without it, and
+         * transient walls that dissolve before the player arrives are harmless.
+         * Bring it back only if real play shows otherwise.
+         */
+        minFreeLanes: 2,
+        /** Radius around a spawn point checked against `minFreeLanes`. */
+        freeLaneCheckRange: 26,
+        /**
+         * Vehicle types. `weight` is relative spawn probability.
+         *
+         * EVERY speed here must stay below `speed.start` (22 m/s). The game is
+         * built on the player overtaking: a vehicle faster than the player is
+         * never passed, never scores, and just recedes. The first pass had them
+         * at 20-36 m/s, which meant most traffic outran the opening pace and the
+         * road ahead emptied out.
+         *
+         * Closing speed therefore runs from ~1 m/s at the start of the ramp to
+         * ~54 m/s against a bus at top speed. That spread is inherent to a 3x
+         * speed ramp, and it's what makes late-run traffic genuinely dangerous.
+         */
+        types: [
+            { name: 'car', width: 1.9, height: 0.95, length: 4.2, speedMin: 17, speedMax: 21, weight: 5, color: 0x3f7fbf },
+            { name: 'coupe', width: 1.8, height: 0.85, length: 3.9, speedMin: 19, speedMax: 23, weight: 3, color: 0xd8b23a },
+            { name: 'van', width: 2.1, height: 1.7, length: 5.4, speedMin: 14, speedMax: 18, weight: 3, color: 0xe3e0d6 },
+            { name: 'bus', width: 2.4, height: 2.5, length: 9.0, speedMin: 12, speedMax: 15, weight: 2, color: 0xc25b3a },
+        ],
+    },
+
+    /**
+     * Scoring. Distance is the base; cutting past traffic is the skill bonus.
+     *
+     * Every overtake counts as one cut — that IS the game's stated goal ("cut
+     * traffic as long as it can"), and a separate proximity-gated "near miss"
+     * tier was dropped as complexity Phase 4 doesn't need. Add it back as a
+     * second counter if the metric needs more texture.
+     */
+    scoring: {
+        /** Score per vehicle cut. */
+        cutBonus: 50,
+    },
+
+    /**
      * The asphalt ribbon, streamed in bands so it can follow a curving road.
      *
      * `bandsAhead * bandLength` must reach past the terrain's own draw edge, or
@@ -316,6 +424,21 @@ export const gameConfig = {
         distanceY: 90,
         speedY: 150,
         hintY: 1180,
+        /** Cars cut — the skill readout, so it sits near the distance. */
+        cutsY: 205,
+        cutsFontSize: 30,
+        cutsColor: '#ffd98a',
+        /** Game-over panel. */
+        gameOverY: 760,
+        gameOverFontSize: 76,
+        gameOverColor: '#ffffff',
+        gameOverText: 'CRASHED',
+        summaryY: 670,
+        summaryFontSize: 34,
+        restartY: 570,
+        restartFontSize: 30,
+        restartText: 'TAP TO RESTART',
+        restartColor: '#9fe8ff',
         distanceFontSize: 62,
         speedFontSize: 34,
         hintFontSize: 26,

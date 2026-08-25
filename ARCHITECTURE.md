@@ -405,6 +405,41 @@ two failure modes that both showed up in play:
    above the asphalt**, swallowing the road edge in a staircase. `FLAT_MARGIN` in
    `heightField.ts` handles this, derived from the grid rather than hardcoded.
 
+### 5.5a Tuning difficulty with a simulated driver
+
+Traffic density, spawn spacing and vehicle speeds can't be tuned by feel alone —
+the failure they produce is rare and specific: a formation the player physically
+cannot pass. Playing for it takes hours; simulating it takes seconds.
+
+The method used in Phase 4, worth reusing for any later balance question:
+
+1. Port the spawn/move/despawn logic into a standalone script (it's pure
+   arithmetic on `worldZ`, no engine needed).
+2. Add a **greedy driver**: each step, sample ~40 lateral positions, score each
+   by clearance to the nearest blocking vehicle within a lookahead, and steer
+   toward the best with the game's real `maxLateralSpeed` and damping.
+3. Run 100km+ per configuration and count crashes — but separately count
+   crashes where **no lateral position on the road was safe**. That second
+   number is the one that matters; it's the unwinnable case.
+
+What it found, which feel would not have:
+
+- A **pool leak**: traffic faster than the player's opening speed recedes
+  forever, and with only a despawn-behind test it holds its slot until the pool
+  is full of distant vehicles and spawning stops. Hence `despawnAhead`.
+- An **empty opening**: at the original speeds, closing speed early in the ramp
+  meant the first overtake was ~26 seconds away — longer than a whole run.
+  Hence traffic strictly slower than `speed.start`, plus seeding the road at
+  reset (first cut now ~129m, about 5 seconds).
+- A **fairness tail**: at spawn gap 62→34 the design is fair 98.8% of the time —
+  3 unavoidable deaths per 150km. Loosening to 78→46 gives zero across 160km at
+  1.03 crashes/km. In a playable ad an unavoidable death is the one thing that
+  stops a player retrying, so that tail was worth 0.6 crashes/km.
+- That a **dynamic anti-wall guard wasn't needed.** Transient walls do form
+  (~0.05/km, since vehicles at different speeds rearrange long after spawning),
+  but they dissolve before the player arrives. Prototyping the guard in
+  simulation and measuring no benefit is what kept it out of the codebase.
+
 ### 5.8 Fog is a feature, not decoration
 An exponential fog matched to the sky/background color lets the far plane and
 the chunk spawn boundary sit close in without a visible pop-in edge. It's the
@@ -629,3 +664,26 @@ src/
   Flagged, not done: the four wheel meshes are barely visible from a chase camera
   and are a cheap optimisation target (see the note in `PlayerCar._buildWheels`);
   traffic must not copy that pattern.
+- **2026-08-25** — **Phase 4 done.** Traffic and the game loop.
+  `src/game/TrafficSystem.ts` (fixed 16-vehicle pool; one shared unit BoxGeometry
+  scaled per type and one material per type, so a vehicle is one draw call and
+  the pool is four materials — deliberately not `PlayerCar`'s six-mesh approach,
+  which at this count would be ~96 draw calls; lane placement, weighted type
+  selection, spawn spacing eased by speed, seeding on reset, and recycling in
+  both directions). `src/game/Collision.ts` (hand-rolled XZ interval overlap —
+  see §5.5; Y ignored deliberately, since every vehicle is on the same surface).
+  `src/ui/GameOverPanel.ts`, a `cuts` readout in the HUD, and `RunPhase` on
+  `GameState` with crash/restart wiring in the scene.
+  Traffic reuses the road functions the player and markers already use —
+  `roadCenterX`, `surfaceHeightAt` (NOT `heightAt`; see §5.7b) and
+  `roadPitchAt`/`roadHeadingAt` — so it sits correctly through curves and crests
+  with no code of its own.
+  Balance set by simulation rather than feel; method and findings in §5.5a.
+  Verified end to end: crash panel reads `242 m · 3 cut · 392 pts` (242 + 3×50),
+  world freezes, tap restarts with a re-seeded road and no page errors.
+  `tsc --noEmit` clean. Pack size **943.7KB / 2MB** (+7KB), draws 67 → 74.
+
+  Known rough edge, deferred to Phase 6: on impact the player's car is left
+  overlapping the vehicle it hit, because there's no separation or crash
+  animation — the run simply stops. It reads as clipping. A short impact
+  sequence (or just backing the car off to contact distance) is the fix.

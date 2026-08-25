@@ -22,9 +22,11 @@ export class Hud {
     private _distance: Label;
     private _speed: Label;
     private _hint: Label;
+    private _cuts: Label;
     /** Only repaint the text when the displayed value actually changes. */
     private _lastMetres = -1;
     private _lastKph = -1;
+    private _lastCuts = -1;
 
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
@@ -33,6 +35,7 @@ export class Hud {
         this._speed = this._makeLabel(scene, cx, cfg.hud.speedY, cfg.hud.speedFontSize, cfg.hud.textColor, true);
         this._hint = this._makeLabel(scene, cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
         this._hint.text = cfg.hud.hintText;
+        this._cuts = this._makeLabel(scene, cx, cfg.hud.cutsY, cfg.hud.cutsFontSize, cfg.hud.cutsColor, true);
     }
 
     /**
@@ -54,7 +57,7 @@ export class Hud {
         return label;
     }
 
-    update(state: GameState, hasSteered: boolean): void {
+    update(state: GameState, hasSteered: boolean, cuts: number): void {
         const metres = Math.floor(state.distance);
         if (metres !== this._lastMetres) {
             this._lastMetres = metres;
@@ -65,6 +68,11 @@ export class Hud {
         if (kph !== this._lastKph) {
             this._lastKph = kph;
             this._speed.text = `${kph} km/h`;
+        }
+
+        if (cuts !== this._lastCuts) {
+            this._lastCuts = cuts;
+            this._cuts.text = `${cuts} CUT`;
         }
 
         // The hint has done its job the moment the player steers once.

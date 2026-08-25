@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Scene, Node, AmbientLight3D, DirectionalLight3D } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { GameState } from '../game/GameState';
+import { TrafficSystem } from '../game/TrafficSystem';
+import { findCollision, scoreFor } from '../game/Collision';
 import { InputController } from '../game/InputController';
 import { PlayerCar } from '../game/PlayerCar';
 import { FollowCamera } from '../game/FollowCamera';
@@ -10,14 +12,15 @@ import { TerrainStreamer } from '../world/TerrainStreamer';
 import { RoadMesh } from '../world/RoadMesh';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
+import { GameOverPanel } from '../ui/GameOverPanel';
 
 /**
- * GameScene — Phase 3: infinite scroll.
+ * GameScene — Phase 4: traffic and the game loop.
  *
- * Steering, the follow camera, the speed ramp, streamed terrain and the
- * streamed road ribbon are all live. Still to come: traffic (Phase 4) and the
- * real procedural terrain field, scatter and LOD (Phase 5/6) — the height
- * field's ambient hills are a cheap placeholder for now.
+ * Steering, the follow camera, the speed ramp, streamed terrain, the streamed
+ * road ribbon, traffic, collision and the crash/restart loop are all live. Still
+ * to come: the real procedural terrain field, scatter and LOD (Phase 5/6) — the
+ * height field's ambient hills are a cheap placeholder for now.
  *
  * The car never moves forward. It sits at the origin steering on X while the
  * world scrolls past — see WorldScroll and ARCHITECTURE.md §5.1.
@@ -39,7 +42,9 @@ export class GameScene extends Scene {
     private _markers: RoadMarkers;
     private _terrain: TerrainStreamer;
     private _road: RoadMesh;
+    private _traffic: TrafficSystem;
     private _hud: Hud;
+    private _gameOver: GameOverPanel;
     private _perf: PerfHud | null = null;
 
     onLoad(): void {
@@ -80,7 +85,9 @@ export class GameScene extends Scene {
         this._road.update();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
+        this._traffic = new TrafficSystem(this);
         this._hud = new Hud(this);
+        this._gameOver = new GameOverPanel(this);
         if (cfg.debug.showPerf) this._perf = new PerfHud(this, this._terrain, sys);
     }
 
@@ -108,17 +115,60 @@ export class GameScene extends Scene {
      */
     update(dt: number): void {
         this._input.sample();
-        this._state.update(dt);
-        // The car's world Z is `travelled` — it always renders at z ≈ 0.
-        this._car.update(dt, this._input.axis, this._state.scroll.travelled, this._state.speed);
-        // World geometry follows the scroll before the camera reads the car, so
-        // nothing is ever a frame behind what the player is looking at.
-        this._terrain.update();
+
+        if (this._state.isRunning) {
+            this._state.update(dt);
+            const travelled = this._state.scroll.travelled;
+            // The car's world Z is `travelled` — it always renders at z ≈ 0.
+            this._car.update(dt, this._input.axis, travelled, this._state.speed);
+            this._traffic.update(dt, travelled, this._state.speedT);
+
+            // Collision AFTER both have moved this frame, so neither is tested
+            // against the other's previous position.
+            const hit = findCollision(this._car, travelled, this._traffic);
+            if (hit) this._crash();
+
+            // World geometry follows the scroll before the camera reads the car,
+            // so nothing is ever a frame behind what the player is looking at.
+            this._terrain.update();
+            this._road.update();
+            this._markers.update();
+        } else if (this._input.consumeTap()) {
+            this._restart();
+        }
+
+        // The camera keeps easing after a crash — it settles rather than
+        // freezing mid-motion, which reads far better than a hard stop.
+        this._camera.update(dt, this._car, this._state.speedT);
+        this._hud.update(this._state, this._input.hasSteered, this._traffic.cuts);
+        this._perf?.update(dt);
+    }
+
+    private _crash(): void {
+        this._state.crash();
+        this._gameOver.show(
+            this._state.distance,
+            this._traffic.cuts,
+            scoreFor(this._state.distance, this._traffic.cuts),
+        );
+        // The tap that follows is the restart, not a steering input.
+        this._input.consumeTap();
+    }
+
+    private _restart(): void {
+        this._gameOver.hide();
+        this._state.reset();
+        this._car.reset();
+        this._traffic.reset();
+        // A finger may still be down from the restart tap; without this the car
+        // would immediately veer toward whichever half of the screen was pressed.
+        this._input.clearHold();
+        // Rebuild the world for the new run's position and re-seat the camera,
+        // so the player never sees the opening chunks stream in.
+        this._terrain.buildAllNow();
         this._road.update();
         this._markers.update();
-        this._camera.update(dt, this._car, this._state.speedT);
-        this._hud.update(this._state, this._input.hasSteered);
-        this._perf?.update(dt);
+        this._camera.snapTo(this._car);
     }
 
     onUnload(): void {
