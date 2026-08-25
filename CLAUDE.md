@@ -2,8 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
-> **Before writing any code, read [AI_WORKFLOW.md](AI_WORKFLOW.md) in full.**
-> It has the concrete rules and step-by-step workflow for finding real
+> **Before writing any code, read [ARCHITECTURE.md](ARCHITECTURE.md) and
+> [AI_WORKFLOW.md](AI_WORKFLOW.md) in full.**
+> `ARCHITECTURE.md` is this game's design, verified constraints, and phased
+> plan — it exists so you never have to re-derive findings by reading the
+> engine source or the `Procedural_3D_world` project again.
+>
+> `AI_WORKFLOW.md` has the concrete rules and step-by-step workflow for finding real
 > NoonEngine APIs instead of guessing from Cocos/Unity/Phaser/PixiJS
 > conventions — the most common source of broken code in this repo.
 
