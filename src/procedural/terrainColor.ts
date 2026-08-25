@@ -29,9 +29,12 @@ import { smoothstep } from './math';
  * use THREE.Color. Per-vertex interpolation below stays plain arithmetic — the
  * allocation-free part is the hot loop, not these four constants.
  */
-const GRASS_LOW = new THREE.Color(0x5b8a4c);
-const GRASS_HIGH = new THREE.Color(0x7aa85e);
-const DIRT = new THREE.Color(0x7a6647);
+// Saturated deliberately. These are seen through fog that removes 39% of the
+// colour by 100m, so a palette that looks correct up close reads as grey at
+// mid-distance — the terrain has to start more vivid than it should look.
+const GRASS_LOW = new THREE.Color(0x4d9440);
+const GRASS_HIGH = new THREE.Color(0x88c455);
+const DIRT = new THREE.Color(0x8b6a38);
 /**
  * Rock is deliberately a cool blue-grey rather than the warm neutral it started
  * as (0x8d8880). Against the brown of DIRT — which saturates on the same steep

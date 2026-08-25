@@ -336,6 +336,48 @@ export const gameConfig = {
         /** Radius around a spawn point checked against `minFreeLanes`. */
         freeLaneCheckRange: 26,
         /**
+         * Overtaking. Traffic has mixed speeds, so a faster vehicle WILL catch a
+         * slower one in its lane — and with no traffic-vs-traffic collision it
+         * simply drove through it.
+         *
+         * Both halves of the fix are needed. Changing lanes handles the common
+         * case; slowing to match handles being boxed in, and without it a
+         * blocked vehicle still overlaps the one ahead.
+         */
+        overtake: {
+            /** How far ahead a vehicle notices a slower one in its lane. */
+            lookahead: 85,
+            /** Inside this gap it commits: change lanes, or slow to match. */
+            safeGap: 40,
+            /** Seconds of indicator before the move starts. Signal, then act. */
+            signalTime: 0.9,
+            /** Indicator blinks per second. */
+            blinkHz: 2.5,
+            /** Lanes per second during the change. */
+            laneChangeSpeed: 0.85,
+            /**
+             * Required clear gap in the target lane, ahead of and behind the
+             * mover. This pair is the whole balance, measured over 108km of
+             * simulation per setting:
+             *
+             *   34/20 : 0 overlaps, 0.15 lane changes/km — vehicles almost
+             *           always resolved by slowing instead, so the indicator
+             *           was effectively never seen
+             *   22/12 : 0 overlaps, 0.75/km   <- here
+             *   18/10 : 27 overlap frames, up to 0.88m of interpenetration
+             *
+             * One notch looser than this and vehicles clip each other again.
+             */
+            minGapAhead: 22,
+            minGapBehind: 12,
+            /** m/s² used to converge on a blocker's speed, and to recover after. */
+            matchRate: 9,
+            /** Indicator light on the rear corner of the side being moved toward. */
+            indicatorSize: 0.42,
+            indicatorColor: 0xffb020,
+        },
+
+        /**
          * Vehicle types. `weight` is relative spawn probability.
          *
          * EVERY speed here must stay below `speed.start` (22 m/s). The game is
@@ -658,19 +700,20 @@ export const gameConfig = {
      * it. Change it in one place and everything agrees.
      */
     lighting: {
-        ambientColor: 0x9fb8c8,
-        ambientIntensity: 1.35,
+        ambientColor: 0x8ba6bd,
+        ambientIntensity: 0.8,
         sunColor: 0xfff2dd,
-        sunIntensity: 2.4,
+        sunIntensity: 2.9,
         /**
          * Unit-ish; normalised on use. Behind and to the right of the camera.
          *
          * `y` is the mood dial: the sky shader mixes the horizon toward
          * `sky.horizonSunsetColor` by (1 - y), so 0.66 read as dusk — pink haze
-         * under a purple zenith. 0.78 keeps the sun low enough for long, legible
-         * shadows without the whole scene going evening.
+         * under a purple zenith. It also sets how much orange gets mixed into
+         * the DERIVED fog colour, so pushing it too low desaturates the whole
+         * scene. 0.80 keeps the sun low enough for legible shadows.
          */
-        sunDirection: { x: 0.38, y: 0.78, z: 0.5 },
+        sunDirection: { x: 0.38, y: 0.80, z: 0.5 },
         /** How far along `sunDirection` the light is placed, metres. */
         sunDistance: 90,
         /**
@@ -774,13 +817,18 @@ export const gameConfig = {
      * all evaluated per-pixel. One draw call, no textures, which is why it fits
      * a 2MB budget where a cubemap would cost hundreds of kilobytes.
      *
-     * `horizonColor` MUST match `colors.fog`, or distant terrain fades into one
-     * colour while the sky behind it is another and the horizon shows a seam.
+     * `horizonColor` is the single biggest lever on how vivid the game looks,
+     * because the scene's fog colour is DERIVED from it: every surface past ~60m
+     * is blended toward it, and by 140m it's 62% of what you see. The first pass
+     * used P3W's hazy-valley 0xc9dcef, which after the sunset mix came out as
+     * rgb(210,204,206) — 3% saturation, i.e. grey — and washed the whole world
+     * out. 0x7fc2ea lands at 27%, so distance reads as blue atmosphere instead
+     * of as fading to white.
      */
     sky: {
-        zenithColor: 0x2f6fd6,
-        horizonColor: 0xc9dcef,
-        horizonSunsetColor: 0xf2955c,
+        zenithColor: 0x2b6ad4,
+        horizonColor: 0x7fc2ea,
+        horizonSunsetColor: 0xef8f52,
         sunGlowColor: 0xfff2c8,
         /**
          * Clouds as camera-pinned billboards, not as shader noise.
