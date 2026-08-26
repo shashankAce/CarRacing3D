@@ -71,6 +71,7 @@ export const gameConfig = {
             rock: 0xd3ad89,
         },
         road: 0x3c3c44,
+        // road: 0x777778,
         roadLine: 0xe8e4cf,
         car: {
             body: 0xe14b3c,
@@ -943,7 +944,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 7,
+            hour: 14,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
@@ -1342,7 +1343,7 @@ export const gameConfig = {
          * instead of ~8.3k, in both the main and the shadow pass.
          */
         heightMin: 8,
-        heightMax: 14,
+        heightMax: 16,
         trunkRadiusK: 0.035,
         canopyRadiusK: 0.30,
         tiersMin: 2,
@@ -1387,7 +1388,7 @@ export const gameConfig = {
          * trees grow out of the verge and the player clips scenery that looks
          * like it's beside the road rather than on it.
          */
-        roadClearance: 15,
+        roadClearance: 12,
         /**
          * Density mask: candidates whose noise value falls below this are
          * dropped, which is what produces clumps and clearings instead of an
