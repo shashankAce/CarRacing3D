@@ -1,26 +1,23 @@
 import { inputListener, Input } from 'noonengine';
 import { TouchControls, Control } from '../ui/TouchControls';
 
-const LEFT_KEYS = ['ArrowLeft', 'KeyA'];
-const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
 const GAS_KEYS = ['ArrowUp', 'KeyW'];
 const BRAKE_KEYS = ['ArrowDown', 'KeyS'];
 const TAP_KEYS = ['Space', 'Enter'];
 
 /**
- * InputController — collapses keyboard and the on-screen buttons into two axes.
+ * InputController — samples the steering slider and throttle controls.
  *
  * `axis` is -1 (full left) … +1 (full right); `throttle` is +1 gas, -1 brake, 0
- * coasting. Both are SAMPLED each frame rather than pushed by events, so a held
- * key and a held button behave identically and neither can miss a frame.
+ * coasting. Both are sampled each frame rather than pushed into gameplay from
+ * pointer callbacks, so movement remains deterministic between render frames.
  *
- * Keyboard goes through the `inputListener` singleton because KEY_DOWN/KEY_UP
- * are NOT spatial events — `node.on(Input.KEY_DOWN, ...)` routes to the node's
- * own emitter and would never fire. See ARCHITECTURE.md §3 item 11.
+ * Steering comes directly from the on-screen slider, so it retains the full
+ * analogue range rather than collapsing to held/not-held buttons. Keyboard is
+ * retained only for gas, brake and restart during desktop testing.
  *
- * Touch comes from `TouchControls`. This used to split the screen in half for
- * steering, which was fine for one axis and impossible for two — four controls
- * need four targets.
+ * Touch comes from `TouchControls`, which keeps steering and throttle pointers
+ * independent for multi-touch play.
  */
 export class InputController {
 
@@ -43,7 +40,7 @@ export class InputController {
 
     attach(): void {
         // Target-less, so a press ANYWHERE counts as the restart tap. Steering
-        // and throttle come from the buttons, not from this.
+        // and throttle come from TouchControls, not from this.
         inputListener.on(Input.POINTER_DOWN, this._onDown, null, this);
     }
 
@@ -79,14 +76,7 @@ export class InputController {
     sample(): void {
         if (TAP_KEYS.some(k => inputListener.isKeyDown(k))) this._tapPending = true;
 
-        // Keyboard wins while a key is held; otherwise the buttons. They're
-        // rarely both present, and this keeps a stuck button from fighting the
-        // keyboard during desktop testing.
-        this.axis = InputController._pick(
-            this._held(LEFT_KEYS, RIGHT_KEYS),
-            (this._controls.isHeld(Control.STEER_RIGHT) ? 1 : 0)
-            - (this._controls.isHeld(Control.STEER_LEFT) ? 1 : 0),
-        );
+        this.axis = this._controls.steerAxis;
         if (this.axis !== 0) this.hasSteered = true;
 
         this.throttle = InputController._pick(

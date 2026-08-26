@@ -1,13 +1,11 @@
-import { Node, Label, Scene, Input } from 'noonengine';
-import { inputListener } from 'noonengine';
+import { Node, Label, ColorRect, Scene, Input, inputListener } from 'noonengine';
+import type { PointerInputEvent } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
-/** The four on-screen controls, in a fixed order. */
+/** The remaining hold-to-act buttons. Steering is a continuous slider. */
 export const enum Control {
-    STEER_LEFT = 0,
-    STEER_RIGHT = 1,
-    GAS = 2,
-    BRAKE = 3,
+    GAS = 0,
+    BRAKE = 1,
 }
 
 interface Button {
@@ -19,56 +17,56 @@ interface Button {
 }
 
 /**
- * TouchControls — four hold-to-act buttons: steer left/right, gas, brake.
+ * TouchControls — continuous steering slider plus gas and brake buttons.
  *
- * Structure per button: a bare parent node carrying the hit box, with the glyph
- * on a CHILD. The parent has no render component on purpose — `LabelSystem`
- * writes a label's measured text size back into its node
- * (`LabelSystem.js:512`), so putting the glyph on the hit node would shrink the
- * touch target to the size of one character.
+ * The slider owns one pointer at a time and uses implicit pointer capture, so
+ * steering keeps updating even if the thumb leaves the track. Gas and brake
+ * retain their own pointer sets; lifting the throttle thumb therefore cannot
+ * release steering, and vice versa.
  *
- * A node's position is the hit box's CORNER and y runs upward
- * (`InputListener._hitAABB` tests `0 <= local <= width/height`), so the
- * configured positions are bottom-left corners.
- *
- * Release is handled by a GLOBAL pointer-up listener keyed on pointer id, not by
- * a per-node up listener. Two reasons, both of which produce stuck buttons
- * otherwise: a finger that slides off a button never delivers an up event to
- * that node, and a global "release everything" handler would drop the steering
- * button the moment the player lifted their gas thumb.
+ * Visual rectangles are children of a taller invisible hit node. This makes
+ * the slim track easy to grab without drawing a large opaque UI panel over the
+ * road. All positions in config are bottom-left corners in design space.
  */
 export class TouchControls {
 
     private _buttons: Button[] = [];
-    /** Which button each live pointer is holding. */
+    /** Which button each live non-steering pointer is holding. */
     private _byPointer = new Map<number, Button>();
+
+    private _steerAxis = 0;
+    private _steerPointerId: number | null = null;
+    private _steerHit: Node;
+    private _steerThumb: Node;
+    private _steerThumbRect: ColorRect;
+    private _steerLocal = { x: 0, y: 0 };
+
+    /** Continuous steering request consumed by InputController. */
+    get steerAxis(): number { return this._steerAxis; }
 
     constructor(scene: Scene) {
         const c = cfg.controls;
 
-        // Anchor to the LIVE design width. Under FIXED_HEIGHT it varies with the
-        // device's aspect ratio, so anything derived from `cfg.design.width`
-        // drifts — and centre-relative offsets pushed the left button off-screen
-        // entirely on a narrow phone.
+        // Anchor to the live design width. FIXED_HEIGHT changes it with device
+        // aspect ratio, so cfg.design.width is only a fallback during startup.
         const width = inputListener.engine?.display?.designWidth ?? cfg.design.width;
         const left = c.edgeMargin;
         const right = width - c.edgeMargin - c.size;
 
+        this._buildSteeringSlider(scene, left);
+
         const layout: Array<[Control, number, number, string]> = [
-            [Control.STEER_LEFT, left, c.steerY, '◀'],
-            [Control.STEER_RIGHT, left + c.size + c.buttonGap, c.steerY, '▶'],
             [Control.GAS, right, c.gasY, '▲'],
             [Control.BRAKE, right, c.brakeY, '▼'],
         ];
 
         for (const [control, x, y, glyphText] of layout) {
-            const hit = new Node(x, y);
+            // Config stores the bottom-left; Node positions use their anchor.
+            const hit = new Node(x + c.size / 2, y + c.size / 2);
             hit.width = c.size;
             hit.height = c.size;
-            scene.addChild(hit);
 
-            // Child, centred in the parent's box.
-            const glyphNode = new Node(c.size / 2, c.size / 2);
+            const glyphNode = new Node(0, 0);
             const glyph = glyphNode.addComponent(Label);
             glyph.fontSize = c.glyphSize;
             glyph.color = c.color;
@@ -76,10 +74,10 @@ export class TouchControls {
             hit.addChild(glyphNode);
 
             const button: Button = { control, hit, glyph, held: new Set() };
-            // Registering a spatial listener is what makes the node hit-testable
-            // at all — it auto-adds an Interactive component.
-            hit.on(Input.POINTER_DOWN, (e: any) => this._press(button, e.pointer.id), this);
+            hit.on(Input.POINTER_DOWN, (e: PointerInputEvent) =>
+                this._press(button, e.pointer.id), this);
             this._buttons.push(button);
+            scene.addChild(hit);
         }
 
         inputListener.on(Input.POINTER_UP, this._release, null, this);
@@ -95,18 +93,87 @@ export class TouchControls {
         return this._buttons[control].held.size > 0;
     }
 
-    /** Drops every hold — used on restart so a finger still down doesn't act. */
+    /** Drops every hold and returns steering to neutral after a restart. */
     clear(): void {
         for (const b of this._buttons) {
             b.held.clear();
             b.glyph.color = cfg.controls.color;
         }
         this._byPointer.clear();
+        this._steerPointerId = null;
+        this._steerThumbRect.color = cfg.controls.steeringSlider.thumbColor;
+        this._setSteerAxis(0);
+    }
+
+    private _buildSteeringSlider(scene: Scene, left: number): void {
+        const s = cfg.controls.steeringSlider;
+        const centreX = left + s.width / 2;
+        const centreY = s.y + s.touchHeight / 2;
+
+        const hit = new Node(centreX, centreY);
+        hit.width = s.width;
+        hit.height = s.touchHeight;
+
+        const track = new Node(0, 0);
+        track.width = s.width;
+        track.height = s.trackHeight;
+        track.addComponent(ColorRect).color = s.trackColor;
+        hit.addChild(track);
+
+        const centre = new Node(0, 0);
+        centre.width = s.centerWidth;
+        centre.height = s.centerHeight;
+        centre.addComponent(ColorRect).color = s.centerColor;
+        hit.addChild(centre);
+
+        const thumb = new Node(0, 0);
+        thumb.width = s.thumbWidth;
+        thumb.height = s.thumbHeight;
+        const thumbRect = thumb.addComponent(ColorRect);
+        thumbRect.color = s.thumbColor;
+        hit.addChild(thumb);
+
+        hit.on(Input.POINTER_DOWN, this._steerDown, this);
+        hit.on(Input.POINTER_MOVE, this._steerMove, this);
+        scene.addChild(hit);
+
+        this._steerHit = hit;
+        this._steerThumb = thumb;
+        this._steerThumbRect = thumbRect;
+    }
+
+    private _steerDown(e: PointerInputEvent): void {
+        // A second steering finger does not steal the active finger's control.
+        if (this._steerPointerId !== null && this._steerPointerId !== e.pointer.id) return;
+        this._steerPointerId = e.pointer.id;
+        this._steerThumbRect.color = cfg.controls.steeringSlider.activeThumbColor;
+        this._setSteerFromWorld(e.x, e.y);
+    }
+
+    private _steerMove(e: PointerInputEvent): void {
+        if (this._steerPointerId !== e.pointer.id) return;
+        this._setSteerFromWorld(e.x, e.y);
+    }
+
+    private _setSteerFromWorld(worldX: number, worldY: number): void {
+        const local = this._steerHit.worldToLocal(worldX, worldY, this._steerLocal);
+        const raw = Math.max(-1, Math.min(1, local.x / this._steerHit.width * 2 - 1));
+        const deadZone = Math.max(0, Math.min(0.99, cfg.controls.steeringSlider.deadZone));
+        const magnitude = Math.abs(raw);
+        const axis = magnitude <= deadZone
+            ? 0
+            : Math.sign(raw) * (magnitude - deadZone) / (1 - deadZone);
+        this._setSteerAxis(axis);
+    }
+
+    private _setSteerAxis(axis: number): void {
+        this._steerAxis = Math.max(-1, Math.min(1, axis));
+        const s = cfg.controls.steeringSlider;
+        const travel = Math.max(0, s.width - s.thumbWidth);
+        this._steerThumb.x = this._steerAxis * travel / 2;
     }
 
     private _press(button: Button, pointerId: number): void {
-        // One pointer holds one button. If it somehow moved between boxes, the
-        // old one must let go or it sticks.
         const previous = this._byPointer.get(pointerId);
         if (previous && previous !== button) this._letGo(previous, pointerId);
 
@@ -115,8 +182,14 @@ export class TouchControls {
         button.glyph.color = cfg.controls.pressedColor;
     }
 
-    private _release(e: any): void {
+    private _release(e: PointerInputEvent): void {
         const pointerId = e.pointer.id;
+        if (this._steerPointerId === pointerId) {
+            this._steerPointerId = null;
+            this._steerThumbRect.color = cfg.controls.steeringSlider.thumbColor;
+            if (cfg.controls.steeringSlider.recenterOnRelease) this._setSteerAxis(0);
+        }
+
         const button = this._byPointer.get(pointerId);
         if (button) this._letGo(button, pointerId);
         this._byPointer.delete(pointerId);

@@ -14,7 +14,8 @@ export const enum RunPhase {
  * Speed is driven by the player's throttle rather than ramping on its own, and
  * the pressure that used to come from an automatic ramp now comes from two
  * places: fuel burns whether or not you're moving, and the sharpest bends can't
- * be held at full speed. Distance is the integral of speed and the score's base.
+ * be held at full speed. Distance is the forward component of the car's path
+ * and the score's base.
  */
 export class GameState {
 
@@ -46,16 +47,13 @@ export class GameState {
 
     get isRunning(): boolean { return this.phase === RunPhase.RUNNING; }
 
-    /**
-     * @param throttle +1 gas, -1 brake, 0 coasting.
-     */
+    /** Updates speed and fuel. PlayerCar supplies the forward distance separately. */
     update(dt: number, throttle: number): void {
         const s = cfg.speed;
         const rate = throttle > 0 ? s.accelerate
             : throttle < 0 ? -s.brake
             : -s.coastDrag;
         this.speed = Math.max(s.min, Math.min(s.max, this.speed + rate * dt));
-        this.scroll.advance(this.speed * dt);
 
         // Burns on time, not distance — that's what makes speed worth having.
         this.fuel -= dt;
@@ -63,6 +61,15 @@ export class GameState {
             this.fuel = 0;
             this.phase = RunPhase.OUT_OF_FUEL;
         }
+    }
+
+    /**
+     * Advances only by the car's world-forward displacement. Steering supplies
+     * the lateral component, and its heading threshold guarantees this is never
+     * negative, so the game has no reverse path.
+     */
+    advance(distance: number): void {
+        this.scroll.advance(Math.max(0, distance));
     }
 
     /**

@@ -303,9 +303,17 @@ export class GameScene extends Scene {
 
         if (this._state.isRunning) {
             this._state.update(dt, this._input.throttle);
+            // The car resolves its forward/lateral velocity from its heading.
+            // Only the forward component scrolls the world, so steering cannot
+            // secretly add speed or turn the endless runner into reverse.
+            const forwardDistance = this._car.update(
+                dt,
+                this._input.axis,
+                this._state.scroll.travelled,
+                this._state.speed,
+            );
+            this._state.advance(forwardDistance);
             const travelled = this._state.scroll.travelled;
-            // The car's world Z is `travelled` — it always renders at z ≈ 0.
-            this._car.update(dt, this._input.axis, travelled, this._state.speed);
             this._traffic.update(dt, travelled, this._state.speedT);
 
             // Collision AFTER both have moved this frame, so neither is tested

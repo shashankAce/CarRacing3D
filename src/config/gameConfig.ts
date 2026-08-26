@@ -104,17 +104,10 @@ export const gameConfig = {
          * ~8.4m of lateral shift across the visible 200m — a clearly visible
          * bend.
          *
-         * BALANCE: the lateral speed a bend demands is
-         * `amplitude × frequency × car speed` — here 0.2 × speed — and it has to
-         * stay under `steering.maxLateralSpeed` (12) or the road outruns the car
-         * and the player is pinned to the edge with no recovery.
-         *
-         * At amplitude 8 that ceiling is **60 m/s (216 km/h)**, below the 66 m/s
-         * top speed. Before the brake existed that made 8 unholdable and it was
-         * dropped to 4.5. WITH a brake it becomes the mechanic: the sharpest
-         * bends cannot be taken flat out, so the player has to come off the gas.
-         * Re-check the ratio whenever amplitude, frequency, max speed or
-         * maxLateralSpeed moves.
+         * With physical steering, the bend must stay inside the turning radius
+         * produced by `car.steering.maxWheelAngle` and the visual axle spacing.
+         * Tighter bends therefore require either more steering lock or less
+         * speed; re-check both whenever the curve settings move.
          */
         curveAmplitude: 8,
         curveFrequency: 0.018,
@@ -628,12 +621,11 @@ export const gameConfig = {
      * X positions are derived at build time from the LIVE design width, not from
      * these numbers — under FIXED_HEIGHT the design width varies with aspect
      * ratio (a 19.5:9 phone gives ~591 units against the nominal 720). A first
-     * pass placed them at fixed offsets from the centre, which put the left
-     * button at x = -5 on a narrow screen, i.e. off the display entirely.
+     * pass placed them at fixed offsets from the centre, which put the steering
+     * control partly off-screen on a narrow phone.
      *
-     * A node's position is the hit box's CORNER, not its centre
-     * (`InputListener._hitAABB` tests `0 <= local <= width/height`), and y is
-     * measured UP from the bottom.
+     * Config positions are bottom-left corners and y is measured UP from the
+     * bottom. TouchControls converts them to the engine's centre anchors.
      */
     controls: {
         size: 150,
@@ -641,31 +633,34 @@ export const gameConfig = {
         glyphSize: 62,
         color: '#f2f6f8',
         pressedColor: '#ffd24a',
-        /** Gap from the screen edge, and between the two steering buttons. */
+        /** Gap from the screen edge. */
         edgeMargin: 26,
-        buttonGap: 12,
         /** Heights of the bottom-left corners (y runs UP from the bottom). */
-        steerY: 140,
         gasY: 250,
         brakeY: 80,
+        /** Continuous -1…+1 steering control, anchored at the lower-left. */
+        steeringSlider: {
+            width: 300,
+            /** Generous invisible vertical hit area for a moving thumb. */
+            touchHeight: 150,
+            trackHeight: 18,
+            trackColor: '#586875',
+            centerWidth: 5,
+            centerHeight: 42,
+            centerColor: '#b9c8d1',
+            thumbWidth: 54,
+            thumbHeight: 82,
+            thumbColor: '#f2f6f8',
+            activeThumbColor: '#ffd24a',
+            /** Bottom edge in design-space units. */
+            y: 140,
+            /** Input around the physical centre ignored as accidental drift. */
+            deadZone: 0.035,
+            /** Real steering self-centres when the player releases the slider. */
+            recenterOnRelease: true,
+        },
     },
 
-
-    /**
-     * Steering. Free lateral movement clamped to the road edges (§6 D2), with
-     * the lateral velocity itself damped so the car has weight rather than
-     * snapping to the input.
-     */
-    steering: {
-        /** Peak sideways speed, m/s. */
-        maxLateralSpeed: 12,
-        /** Exponential damping rate on lateral velocity — higher = twitchier. */
-        response: 9,
-        /** Cosmetic body roll at full lateral speed, radians. */
-        rollFactor: 0.16,
-        /** Cosmetic nose yaw at full lateral speed, radians. */
-        yawFactor: 0.11,
-    },
 
     /**
      * Scrolling road markers. On a flat placeholder world these are the only
@@ -774,7 +769,7 @@ export const gameConfig = {
         hintFontSize: 26,
         textColor: '#f4f9fb',
         hintColor: '#c9d9e2',
-        hintText: '◀ ▶ STEER    ▲ GAS    ▼ BRAKE',
+        hintText: '↔ DRAG TO STEER    ▲ GAS    ▼ BRAKE',
     },
 
     /** Player car dimensions — placeholder boxes until FBX models land. */
@@ -798,13 +793,39 @@ export const gameConfig = {
             color: 0x1a1a1e,
         },
         /**
-         * Exponential damping rate on the car's height, pitch and roll as it
-         * rides the ground — i.e. its suspension. Required, not polish: the
-         * terrain's smallest octave has a 24m wavelength, and at 66 m/s that is
-         * nearly 3 bumps a second. Reading the ground undamped makes the car
-         * jitter hard the moment it leaves the road. Lower = softer.
+         * Forward-only bicycle steering. Positive input turns right. The front
+         * tyres use Ackermann angles, while the chassis follows the angle of
+         * the virtual centre wheel.
          */
-        suspensionRate: 8,
+        steering: {
+            /**
+             * Maximum centre-wheel steering lock (8 degrees). This is lower
+             * than a parking-speed road car because this game never drops below
+             * highway speed; the analogue slider still maps its full travel to
+             * this complete angle range.
+             */
+            maxWheelAngle: 3 * Math.PI / 180,
+            /** How quickly the wheel reaches/re-centres from input. */
+            response: 5,
+            /**
+             * Maximum chassis heading away from world-forward (65 degrees).
+             * Keep below PI/2: this is the forward-only threshold that prevents
+             * steering from ever turning the car around into reverse travel.
+             */
+            maxHeadingAngle: 65 * Math.PI / 180,
+        },
+        /**
+         * Ground-following responses. Height is deliberately faster than the
+         * old shared rate: slow downward damping was what made the car float
+         * above descending road. Tilt is separate so pitch/roll can remain
+         * smooth without opening a visible gap under the tyres.
+         */
+        suspension: {
+            heightResponse: 20,
+            tiltResponse: 14,
+            /** Maximum permitted visual separation while the road falls away. */
+            maxGroundGap: 0.04,
+        },
     },
 
     /**
