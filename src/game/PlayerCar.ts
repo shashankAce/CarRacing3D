@@ -7,17 +7,11 @@ import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
 
 /**
- * Sample offsets along the car's length, as fractions of its half-length, used
- * for the no-penetration test. The two ends matter most; the middle catches a
- * crest passing under the car.
- */
-const FOOTPRINT = [-1, -0.5, 0, 0.5, 1];
-
-/**
  * PlayerCar — placeholder box car, its steering, and how it sits on the ground.
  *
- * Forward motion is the world scrolling past (see WorldScroll), so the car's own
- * driving state is one number: `_x`, its ABSOLUTE lateral world position.
+ * Forward motion is the world scrolling past (see WorldScroll). The car keeps a
+ * rear-pivot lateral position and a steering yaw. Lateral displacement is
+ * derived from that same yaw, never from a free sideways velocity.
  *
  * That word is load-bearing, and it's been both ways:
  *
@@ -28,10 +22,10 @@ const FOOTPRINT = [-1, -0.5, 0, 0.5, 1];
  *    made the car track the curve on its own, so the player could take their
  *    hands off through a bend and the curve became decoration.
  *
- * What's here is absolute x, clamped to the road edges — where the clamp
- * boundary MOVES with the road. That distinction is the whole thing: the car
- * never drifts sideways on its own, so holding a bend takes steering, and
- * reaching an edge is a collision that shoves the car along like a barrier.
+ * The absolute x is clamped to road edges whose boundary moves with the road.
+ * The car never tracks a bend automatically, so holding a curve still requires
+ * steering, but there is no independent sideways velocity that can look like a
+ * body sliding across the asphalt.
  *
  * It rides `surfaceHeightAt` — the DRIVABLE surface, i.e. the top of the asphalt
  * inside the road corridor and the terrain outside it. Not `heightAt`, which is
@@ -44,20 +38,22 @@ export class PlayerCar {
 
     private _group: Group3D;
     private _wheels: THREE.Mesh[] = [];
-    /** Lateral velocity, m/s. */
-    private _vx = 0;
-    /** Absolute lateral world position, metres. */
+    /** Absolute lateral position of the rear steering pivot, metres. */
     private _x = 0;
+    /** Damped steering yaw; negative points right because local forward is -Z. */
+    private _yaw = 0;
     /** Damped ride height, pitch and roll — the suspension's state. */
     private _y = 0;
     private _pitch = 0;
     private _roll = 0;
+    private _rideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    private _rideQuaternion = new THREE.Quaternion();
+    private _ridePoint = new THREE.Vector3();
     /** True while the car is pinned against a road edge. */
     private _againstEdge = false;
 
     /** Read by the follow camera. */
     get position(): THREE.Vector3 { return this._group.position; }
-    get lateralSpeedT(): number { return this._vx / cfg.steering.maxLateralSpeed; }
 
     /**
      * True while the car is scraping a road edge. Nothing consumes it yet —
@@ -93,11 +89,12 @@ export class PlayerCar {
         // The DRIVABLE surface under the car, not the group's y — that carries
         // suspension travel, and a shadow bobbing with the springs reads as the
         // ground moving rather than the car.
+        const position = this._group.object3D.position;
         decals.add(
             this._shadowHandle,
-            this._x,
-            surfaceHeightAt(this._x, travelled),
-            0,
+            position.x,
+            surfaceHeightAt(position.x, travelled - position.z),
+            position.z,
             1,
         );
     }
@@ -228,28 +225,45 @@ export class PlayerCar {
         }
     }
 
-    /**
-     * The lowest the car's body can sit at `pitch` without any part of its
-     * underside passing through the ground.
-     *
-     * Using the ground height under the car's CENTRE is wrong, and visibly so:
-     * a rigid body in a dip rests on its ends, not its middle, so centre-height
-     * buried the body — the rear especially, since damping lag left it
-     * misaligned on a grade. Taking the maximum over the footprint gives the
-     * real resting height: on a crest that reduces to the centre (the car
-     * bridges it), in a dip it lifts to the ends, and on a constant grade the
-     * `s·sin(pitch)` term cancels the slope so it reduces to the centre again.
-     */
-    private _requiredHeight(worldZ: number, pitch: number): number {
+    /** Drivable height beneath a yawed point on the car's local ground plane. */
+    private _heightAtLocal(
+        localX: number,
+        localZ: number,
+        centreX: number,
+        centreWorldZ: number,
+    ): number {
+        const sin = Math.sin(this._yaw);
+        const cos = Math.cos(this._yaw);
+        const x = centreX + localX * cos + localZ * sin;
+        // Render Z is mirrored relative to absolute world Z.
+        const z = centreWorldZ + localX * sin - localZ * cos;
+        return surfaceHeightAt(x, z);
+    }
+
+    /** Lowest origin height that keeps the yawed, tilted footprint above ground. */
+    private _requiredHeight(
+        centreX: number,
+        centreWorldZ: number,
+        pitch: number,
+        roll: number,
+    ): number {
+        this._rideEuler.set(pitch, this._yaw, roll, 'YXZ');
+        this._rideQuaternion.setFromEuler(this._rideEuler);
+
+        const hw = this.halfWidth;
         const hl = this.halfLength;
-        const sinPitch = Math.sin(pitch);
         let required = -Infinity;
-        for (const f of FOOTPRINT) {
-            // Local +z is toward the rear, so a point at local z = s sits at
-            // world z = worldZ - s, and its underside is at y - s·sin(pitch).
-            const s = f * hl;
-            const need = surfaceHeightAt(this._x, worldZ - s) + s * sinPitch;
-            if (need > required) required = need;
+        // Corners, axle centres and chassis centre handle slopes, dips and crests
+        // without allocating contact objects during the frame.
+        for (let xi = -1; xi <= 1; xi++) {
+            for (let zi = -1; zi <= 1; zi++) {
+                const localX = xi * hw;
+                const localZ = zi * hl;
+                this._ridePoint.set(localX, 0, localZ).applyQuaternion(this._rideQuaternion);
+                const need = this._heightAtLocal(localX, localZ, centreX, centreWorldZ)
+                    - this._ridePoint.y;
+                if (need > required) required = need;
+            }
         }
         return required;
     }
@@ -258,62 +272,94 @@ export class PlayerCar {
      * @param axis    -1 … +1 from InputController.
      * @param worldZ  The car's absolute world Z — i.e. `scroll.travelled`, since
      *                the car always renders at z ≈ 0.
-     * @param speed   Forward speed, m/s — spins the wheels.
+     * @param speed   Forward road speed, m/s — drives the yaw path and wheels.
      */
     update(dt: number, axis: number, worldZ: number, speed: number): void {
-        const s = cfg.steering;
+        const steering = cfg.car.steering;
 
-        // Exponential damping toward the target velocity — frame-rate
-        // independent, unlike a fixed per-frame lerp factor.
-        const targetVx = axis * s.maxLateralSpeed;
-        this._vx += (targetVx - this._vx) * (1 - Math.exp(-s.response * dt));
+        // Input controls the visible rear-pivot rotation directly. It keeps the
+        // full configured range at every speed, so changing speed cannot make
+        // the body unexpectedly straighten while the player holds steering.
+        const targetYaw = -axis * steering.maxYawAngle;
+        const steerK = 1 - Math.exp(-steering.response * dt);
+        this._yaw += (targetYaw - this._yaw) * steerK;
 
         // Clamp to the asphalt. The limits are computed from the road centre at
         // the car's own z, so they TRACK the curve — but the car's position
         // doesn't, which is what forces the player to steer.
-        this._x += this._vx * dt;
+        // The movement path uses the exact input-driven yaw, keeping the body
+        // direction and travel direction aligned without sideways slip.
+        this._x -= Math.tan(this._yaw) * speed * dt;
         const centreX = roadCenterX(worldZ);
         const limit = cfg.road.halfWidth - this.halfWidth;
         const minX = centreX - limit, maxX = centreX + limit;
-        if (this._x < minX) { this._x = minX; this._vx = 0; this._againstEdge = true; }
-        else if (this._x > maxX) { this._x = maxX; this._vx = 0; this._againstEdge = true; }
+        if (this._x < minX) { this._x = minX; this._againstEdge = true; }
+        else if (this._x > maxX) { this._x = maxX; this._againstEdge = true; }
         else this._againstEdge = false;
 
-        const hw = this.halfWidth, hl = this.halfLength;
-        const front = surfaceHeightAt(this._x, worldZ + hl);
-        const rear = surfaceHeightAt(this._x, worldZ - hl);
-        const left = surfaceHeightAt(this._x - hw, worldZ);
-        const right = surfaceHeightAt(this._x + hw, worldZ);
+        const pivotZ = this.halfLength * steering.yawPivotFactor;
+        const bodyX = this._x - Math.sin(this._yaw) * pivotZ;
+        const bodyRenderZ = pivotZ * (1 - Math.cos(this._yaw));
+        const bodyWorldZ = worldZ - bodyRenderZ;
+
+        // Derive the supporting road plane from the four actual tyre contact
+        // locations after yaw. Axis-aligned samples were the reason the body
+        // stopped matching the road whenever it was turned on a slope.
+        const wheel = cfg.car.wheel;
+        const wheelX = cfg.car.width / 2 - wheel.width * (0.5 - wheel.outboard);
+        const axleZ = this.halfLength * wheel.axleOffset;
+        const frontLeft = this._heightAtLocal(-wheelX, -axleZ, bodyX, bodyWorldZ);
+        const frontRight = this._heightAtLocal(wheelX, -axleZ, bodyX, bodyWorldZ);
+        const rearLeft = this._heightAtLocal(-wheelX, axleZ, bodyX, bodyWorldZ);
+        const rearRight = this._heightAtLocal(wheelX, axleZ, bodyX, bodyWorldZ);
+        const front = (frontLeft + frontRight) * 0.5;
+        const rear = (rearLeft + rearRight) * 0.5;
+        const left = (frontLeft + rearLeft) * 0.5;
+        const right = (frontRight + rearRight) * 0.5;
 
         // Rotating about +X tilts the forward axis (-Z) up, so a front higher
-        // than the rear is a positive pitch. Rotating about +Z tilts the roof
-        // toward -X, so ground higher on the left is also positive.
-        const targetPitch = Math.atan2(front - rear, cfg.car.length);
-        const targetRoll = Math.atan2(left - right, cfg.car.width);
+        // than the rear is positive pitch. Negative +Z rotation raises the left
+        // tyre, so left-high ground produces negative roll.
+        const targetPitch = Math.atan2(front - rear, axleZ * 2);
+        const targetRoll = Math.atan2(right - left, wheelX * 2);
 
-        // Suspension. Terrain's smallest octave is a 24m wavelength, which at
-        // top speed is ~3 bumps a second — read undamped, the car vibrates.
-        const k = 1 - Math.exp(-cfg.car.suspensionRate * dt);
-        this._pitch += (targetPitch - this._pitch) * k;
-        this._roll += (targetRoll - this._roll) * k;
-        this._y += (this._requiredHeight(worldZ, this._pitch) - this._y) * k;
+        const suspension = cfg.car.suspension;
+        const tiltK = 1 - Math.exp(-suspension.tiltResponse * dt);
+        this._pitch += (targetPitch - this._pitch) * tiltK;
+        this._roll += (targetRoll - this._roll) * tiltK;
 
-        // Damping may settle DOWN toward the target, which is what a suspension
-        // should do as ground falls away — but it must never settle down THROUGH
-        // the ground. The required height is computed against the pitch actually
-        // in use, not the target, so a lagging pitch can't open a gap either.
-        const floor = this._requiredHeight(worldZ, this._pitch);
+        const floor = this._requiredHeight(bodyX, bodyWorldZ, this._pitch, this._roll);
+        const heightK = 1 - Math.exp(-suspension.heightResponse * dt);
+        this._y += (floor - this._y) * heightK;
+
+        // Clamp both sides of the damped travel. Rising ground cannot penetrate
+        // the car, and falling ground cannot open the large gap that read as
+        // floating on descents.
         if (this._y < floor) this._y = floor;
+        const ceiling = floor + suspension.maxGroundGap;
+        if (this._y > ceiling) this._y = ceiling;
 
         const obj = this._group.object3D;
-        obj.position.set(this._x, this._y, 0);
-        obj.rotation.x = this._pitch;
-        // Steering yaw and roll are cosmetic, and stack on the ground's own tilt.
-        // The car does NOT take the road's heading — its nose points where the
-        // player is steering, not where the road happens to go.
-        const t = this.lateralSpeedT;
-        obj.rotation.y = -t * cfg.steering.yawFactor;
-        obj.rotation.z = this._roll + t * cfg.steering.rollFactor;
+        // Roll stacks on the ground tilt. Yaw follows steering input directly;
+        // roll grows with both steering amount and speed.
+        const turnT = steering.maxYawAngle === 0 ? 0 : -this._yaw / steering.maxYawAngle;
+        const speedFactor = THREE.MathUtils.clamp(speed / cfg.speed.max, 0, 1);
+
+        // THREE rotates an object about its centre. Translate that centre along
+        // the arc around a fixed rear pivot so the rear stays planted and the
+        // nose visibly sweeps into the turn instead of merely spinning in place.
+        obj.position.set(
+            bodyX,
+            this._y,
+            bodyRenderZ,
+        );
+        // YXZ keeps pitch and ground roll local to the yawed chassis.
+        obj.rotation.set(
+            this._pitch,
+            this._yaw,
+            this._roll + turnT * steering.maxRollAngle * speedFactor,
+            'YXZ',
+        );
 
         // Roll the tyres. A wheel carrying the car forward (-Z) has its top
         // moving -Z too, which is a NEGATIVE rotation about +X.
@@ -322,14 +368,14 @@ export class PlayerCar {
     }
 
     reset(): void {
-        this._vx = 0;
         this._x = roadCenterX(0);
+        this._yaw = 0;
         this._pitch = 0;
         this._roll = 0;
-        this._y = this._requiredHeight(0, 0);
+        this._y = this._requiredHeight(this._x, 0, 0, 0);
         this._againstEdge = false;
         this._group.object3D.position.set(this._x, this._y, 0);
-        this._group.object3D.rotation.set(0, 0, 0);
+        this._group.object3D.rotation.set(0, 0, 0, 'YXZ');
         for (const wheel of this._wheels) wheel.rotation.x = 0;
     }
 }

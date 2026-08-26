@@ -29,12 +29,13 @@ export function findCollision(
     traffic: TrafficSystem,
 ): TrafficVehicle | null {
     const carX = car.position.x;
+    const carWorldZ = travelled - car.position.z;
     const halfW = car.halfWidth;
     const halfL = car.halfLength;
 
     for (const v of traffic.vehicles) {
         if (!v.active) continue;
-        if (Math.abs(v.worldZ - travelled) > v.halfLength + halfL) continue;
+        if (Math.abs(v.worldZ - carWorldZ) > v.halfLength + halfL) continue;
         if (Math.abs(traffic.worldXOf(v) - carX) > v.halfWidth + halfW) continue;
         return v;
     }

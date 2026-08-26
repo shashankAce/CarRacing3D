@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Node, Group3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
-import { roadCenterX, roadHeadingAt, roadPitchAt } from '../world/roadPath';
+import { roadCenterX, roadHeadingAt } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
 import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
@@ -36,6 +36,8 @@ export interface TrafficVehicle {
     signalTimer: number;
     /** -1 signalling/moving left, +1 right, 0 not signalling. */
     signalDir: number;
+    /** Smoothed yaw relative to the road heading while changing lanes. */
+    laneYaw: number;
     /** Set once this vehicle has been counted as cut, so it can't score twice. */
     counted: boolean;
     /** Cached from its type, for collision and placement. */
@@ -56,9 +58,10 @@ export interface TrafficVehicle {
  *
  * Vehicles use the same road functions the player and the lane markers do —
  * `roadCenterX` for lane position, `surfaceHeightAt` for ride height (NOT
- * `heightAt`, which is the terrain under the asphalt), and
- * `roadPitchAt`/`roadHeadingAt` for orientation — so they sit on the road
- * correctly through curves and over crests without any code of their own.
+ * `heightAt`, which is the terrain under the asphalt), and `roadHeadingAt` for
+ * orientation. Ride height, pitch and roll come from the vehicle's yawed
+ * footprint, so its full body stays supported through curves, slopes and
+ * crests instead of floating from a single centre-height sample.
  *
  * There is no traffic-vs-traffic collision. The overtake logic is what keeps
  * vehicles apart, which is why it has to handle the blocked case by slowing
@@ -75,6 +78,10 @@ export class TrafficSystem {
     private _totalWeight = 0;
     /** Drives indicator blinking; shared so every signal blinks in phase. */
     private _blinkClock = 0;
+    /** Scratch objects shared by the sequential traffic placement pass. */
+    private _rideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    private _rideQuaternion = new THREE.Quaternion();
+    private _ridePoint = new THREE.Vector3();
 
     /** Vehicles the player has cut past this run. */
     cuts = 0;
@@ -114,7 +121,8 @@ export class TrafficSystem {
                 laneF: 0, targetLane: 0, worldZ: 0,
                 desiredSpeed: 0, speed: 0,
                 manoeuvre: Manoeuvre.CRUISING, signalTimer: 0, signalDir: 0,
-                counted: false, halfWidth: 0, halfLength: 0, height: 0,
+                laneYaw: 0, counted: false,
+                halfWidth: 0, halfLength: 0, height: 0,
             });
         }
         this.reset();
@@ -200,7 +208,19 @@ export class TrafficSystem {
         // Progress an in-flight manoeuvre first.
         if (v.manoeuvre === Manoeuvre.SIGNALLING) {
             v.signalTimer -= dt;
-            if (v.signalTimer <= 0) v.manoeuvre = Manoeuvre.CHANGING;
+            if (v.signalTimer <= 0) {
+                // Re-check after signalling: speeds and nearby traffic may have
+                // changed since this lane was first selected. The reservation
+                // keeps new cars out, while this catches older conflicting
+                // manoeuvres and cars that closed the gap during the signal.
+                if (this._laneIsClear(v, v.targetLane, false)) {
+                    v.manoeuvre = Manoeuvre.CHANGING;
+                } else {
+                    v.targetLane = Math.round(v.laneF);
+                    v.manoeuvre = Manoeuvre.CRUISING;
+                    v.signalDir = 0;
+                }
+            }
         } else if (v.manoeuvre === Manoeuvre.CHANGING) {
             const step = o.laneChangeSpeed * dt;
             const remaining = v.targetLane - v.laneF;
@@ -222,6 +242,21 @@ export class TrafficSystem {
         const rate = o.matchRate * dt;
         v.speed += Math.max(-rate, Math.min(rate, target - v.speed));
 
+        // Point the body along the path it is actually taking. `laneF` moves at
+        // lanes/second, so convert that to lateral metres/second and compare it
+        // with forward speed. Local forward is -Z: moving toward +X therefore
+        // needs a negative yaw, matching the player's steering convention.
+        const laneWidth = (cfg.road.halfWidth * 2) / cfg.traffic.laneCount;
+        const lateralSpeed = v.manoeuvre === Manoeuvre.CHANGING
+            ? v.signalDir * o.laneChangeSpeed * laneWidth
+            : 0;
+        const pathYaw = -Math.atan2(lateralSpeed, Math.max(v.speed, 0.01));
+        const targetLaneYaw = THREE.MathUtils.clamp(
+            pathYaw, -o.laneChangeMaxYaw, o.laneChangeMaxYaw,
+        );
+        const yawK = 1 - Math.exp(-o.laneChangeYawResponse * dt);
+        v.laneYaw += (targetLaneYaw - v.laneYaw) * yawK;
+
         // Only look for a way past while cruising — committing to a second
         // manoeuvre mid-change is how vehicles end up straddling lanes.
         if (v.manoeuvre !== Manoeuvre.CRUISING || !blocker) return;
@@ -234,7 +269,7 @@ export class TrafficSystem {
         for (const dir of [-1, 1]) {
             const candidate = lane + dir;
             if (candidate < 0 || candidate >= cfg.traffic.laneCount) continue;
-            if (!this._laneIsClear(v, candidate)) continue;
+            if (!this._laneIsClear(v, candidate, true)) continue;
             v.targetLane = candidate;
             v.manoeuvre = Manoeuvre.SIGNALLING;
             v.signalTimer = o.signalTime;
@@ -261,15 +296,40 @@ export class TrafficSystem {
         return best;
     }
 
-    /** Whether `lane` has room for `v` to move into, ahead and behind. */
-    private _laneIsClear(v: TrafficVehicle, lane: number): boolean {
+    /** Whether a vehicle physically occupies or has reserved `lane`. */
+    private _usesLane(v: TrafficVehicle, lane: number): boolean {
+        return Math.abs(v.laneF - lane) <= 0.6
+            || (v.manoeuvre !== Manoeuvre.CRUISING && v.targetLane === lane);
+    }
+
+    /**
+     * Whether `lane` stays clear for the whole manoeuvre, not only this frame.
+     * Reservations prevent two cars from independently choosing the same gap.
+     */
+    private _laneIsClear(
+        v: TrafficVehicle,
+        lane: number,
+        includeSignalTime: boolean,
+    ): boolean {
         const o = cfg.traffic.overtake;
+        const laneDistance = Math.abs(lane - v.laneF);
+        const horizon = (includeSignalTime ? o.signalTime : 0)
+            + laneDistance / o.laneChangeSpeed;
+
         for (const other of this._pool) {
             if (!other.active || other === v) continue;
-            if (Math.abs(other.laneF - lane) > 0.6) continue;
-            const gap = other.worldZ - v.worldZ;
-            if (gap >= 0 && gap < o.minGapAhead) return false;
-            if (gap < 0 && -gap < o.minGapBehind) return false;
+            if (!this._usesLane(other, lane)) continue;
+
+            const gapNow = other.worldZ - v.worldZ;
+            const gapAtCompletion = gapNow + (other.speed - v.speed) * horizon;
+            const nearestBehind = Math.min(gapNow, gapAtCompletion);
+            const nearestAhead = Math.max(gapNow, gapAtCompletion);
+
+            // The relative gap moves linearly over this short horizon. If its
+            // swept interval intersects the forbidden zone, the paths conflict.
+            if (nearestAhead > -o.minGapBehind && nearestBehind < o.minGapAhead) {
+                return false;
+            }
         }
         return true;
     }
@@ -333,30 +393,102 @@ export class TrafficSystem {
     addShadows(decals: ShadowDecals, travelled: number): void {
         for (const v of this._pool) {
             if (!v.active) continue;
-            const x = this.worldXOf(v);
+            const obj = v.group.object3D;
             // World up rather than the road's normal: the road is a near-flat
             // ribbon, and its pitch is gentle enough that the tilt is not worth
             // a per-vehicle sample.
             decals.add(
                 this._shadowHandles[v.type],
-                x,
-                surfaceHeightAt(x, v.worldZ),
-                travelled - v.worldZ,
+                obj.position.x,
+                surfaceHeightAt(obj.position.x, travelled - obj.position.z),
+                obj.position.z,
                 1,
             );
         }
     }
 
+    /** Drivable height beneath a yawed point on a vehicle's local footprint. */
+    private _heightAtLocal(
+        localX: number,
+        localZ: number,
+        centreX: number,
+        centreWorldZ: number,
+        yaw: number,
+    ): number {
+        const sin = Math.sin(yaw);
+        const cos = Math.cos(yaw);
+        const x = centreX + localX * cos + localZ * sin;
+        // Render Z is mirrored relative to absolute world Z.
+        const z = centreWorldZ + localX * sin - localZ * cos;
+        return surfaceHeightAt(x, z);
+    }
+
+    /** Lowest centre height that keeps the whole tilted body above the road. */
+    private _requiredCentreHeight(
+        v: TrafficVehicle,
+        centreX: number,
+        pitch: number,
+        yaw: number,
+        roll: number,
+    ): number {
+        this._rideEuler.set(pitch, yaw, roll, 'YXZ');
+        this._rideQuaternion.setFromEuler(this._rideEuler);
+
+        let required = -Infinity;
+        // Corners, edge centres and the chassis centre make long vehicles
+        // behave correctly over both crests and dips without frame allocations.
+        for (let xi = -1; xi <= 1; xi++) {
+            for (let zi = -1; zi <= 1; zi++) {
+                const localX = xi * v.halfWidth;
+                const localZ = zi * v.halfLength;
+                this._ridePoint
+                    .set(localX, -v.height / 2, localZ)
+                    .applyQuaternion(this._rideQuaternion);
+                const need = this._heightAtLocal(
+                    localX, localZ, centreX, v.worldZ, yaw,
+                ) - this._ridePoint.y;
+                if (need > required) required = need;
+            }
+        }
+        return required;
+    }
+
     private _place(v: TrafficVehicle, travelled: number): void {
         const x = this.worldXOf(v);
+        // Road yaw follows the curve; lane yaw turns the body into its lateral
+        // path during an overtake and smoothly returns it to the lane afterward.
+        const yaw = roadHeadingAt(v.worldZ) + v.laneYaw;
+
+        // Sample the four yawed footprint corners. A centre sample gives the
+        // wrong height and no roll, which is especially visible on descents and
+        // while a long vehicle crosses a crest.
+        const frontLeft = this._heightAtLocal(
+            -v.halfWidth, -v.halfLength, x, v.worldZ, yaw,
+        );
+        const frontRight = this._heightAtLocal(
+            v.halfWidth, -v.halfLength, x, v.worldZ, yaw,
+        );
+        const rearLeft = this._heightAtLocal(
+            -v.halfWidth, v.halfLength, x, v.worldZ, yaw,
+        );
+        const rearRight = this._heightAtLocal(
+            v.halfWidth, v.halfLength, x, v.worldZ, yaw,
+        );
+        const front = (frontLeft + frontRight) * 0.5;
+        const rear = (rearLeft + rearRight) * 0.5;
+        const left = (frontLeft + rearLeft) * 0.5;
+        const right = (frontRight + rearRight) * 0.5;
+        const pitch = Math.atan2(front - rear, v.halfLength * 2);
+        const roll = Math.atan2(right - left, v.halfWidth * 2);
+
         const obj = v.group.object3D;
         obj.position.set(
             x,
-            surfaceHeightAt(x, v.worldZ) + v.height / 2,
+            this._requiredCentreHeight(v, x, pitch, yaw, roll),
             travelled - v.worldZ,
         );
-        obj.rotation.x = roadPitchAt(v.worldZ, v.halfLength * 2);
-        obj.rotation.y = roadHeadingAt(v.worldZ);
+        // YXZ keeps pitch and road roll local to the yawed vehicle body.
+        obj.rotation.set(pitch, yaw, roll, 'YXZ');
 
         // Blink only while signalling or mid-change, on the side being moved to.
         if (v.signalDir === 0) {
@@ -385,9 +517,9 @@ export class TrafficSystem {
         let clearNearby = 0;
         for (let lane = 0; lane < t.laneCount; lane++) {
             const occupiedAtSpawn = this._pool.some(v =>
-                v.active && Math.round(v.laneF) === lane && Math.abs(v.worldZ - spawnZ) < t.minLaneGap);
+                v.active && this._usesLane(v, lane) && Math.abs(v.worldZ - spawnZ) < t.minLaneGap);
             const occupiedNearby = this._pool.some(v =>
-                v.active && Math.round(v.laneF) === lane && Math.abs(v.worldZ - spawnZ) < t.freeLaneCheckRange);
+                v.active && this._usesLane(v, lane) && Math.abs(v.worldZ - spawnZ) < t.freeLaneCheckRange);
             if (!occupiedAtSpawn) free.push(lane);
             if (!occupiedNearby) clearNearby++;
         }
@@ -410,6 +542,7 @@ export class TrafficSystem {
         slot.manoeuvre = Manoeuvre.CRUISING;
         slot.signalTimer = 0;
         slot.signalDir = 0;
+        slot.laneYaw = 0;
         slot.halfWidth = spec.width / 2;
         slot.halfLength = spec.length / 2;
         slot.height = spec.height;

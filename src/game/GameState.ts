@@ -47,13 +47,13 @@ export class GameState {
     get isRunning(): boolean { return this.phase === RunPhase.RUNNING; }
 
     /**
-     * @param throttle +1 gas, -1 brake, 0 coasting.
+     * @param throttle +1 gas, -1 manual brake, 0 automatic brake.
      */
     update(dt: number, throttle: number): void {
         const s = cfg.speed;
         const rate = throttle > 0 ? s.accelerate
             : throttle < 0 ? -s.brake
-            : -s.coastDrag;
+            : -s.autoBrake;
         this.speed = Math.max(s.min, Math.min(s.max, this.speed + rate * dt));
         this.scroll.advance(this.speed * dt);
 

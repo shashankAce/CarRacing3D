@@ -104,17 +104,9 @@ export const gameConfig = {
          * ~8.4m of lateral shift across the visible 200m — a clearly visible
          * bend.
          *
-         * BALANCE: the lateral speed a bend demands is
-         * `amplitude × frequency × car speed` — here 0.2 × speed — and it has to
-         * stay under `steering.maxLateralSpeed` (12) or the road outruns the car
-         * and the player is pinned to the edge with no recovery.
-         *
-         * At amplitude 8 that ceiling is **60 m/s (216 km/h)**, below the 66 m/s
-         * top speed. Before the brake existed that made 8 unholdable and it was
-         * dropped to 4.5. WITH a brake it becomes the mechanic: the sharpest
-         * bends cannot be taken flat out, so the player has to come off the gas.
-         * Re-check the ratio whenever amplitude, frequency, max speed or
-         * maxLateralSpeed moves.
+         * BALANCE: the sharpest road heading must remain reachable by
+         * `car.steering.maxYawAngle`. The car's lateral movement is derived from
+         * that yaw, so there is no independent sideways-speed limit to tune.
          */
         curveAmplitude: 8,
         curveFrequency: 0.018,
@@ -465,10 +457,16 @@ export const gameConfig = {
             blinkHz: 2.5,
             /** Lanes per second during the change. */
             laneChangeSpeed: 0.85,
+            /** Maximum body yaw added while crossing into another lane. */
+            laneChangeMaxYaw: 0.24,
+            /** How quickly the body turns into and straightens after a lane change. */
+            laneChangeYawResponse: 8,
             /**
              * Required clear gap in the target lane, ahead of and behind the
-             * mover. This pair is the whole balance, measured over 108km of
-             * simulation per setting:
+             * mover. Traffic checks the swept relative gap through signalling
+             * and crossing, and reserves the destination lane once committed.
+             * This pair is the whole balance, measured over 108km of simulation
+             * per setting:
              *
              *   34/20 : 0 overlaps, 0.15 lane changes/km — vehicles almost
              *           always resolved by slowing instead, so the indicator
@@ -584,8 +582,8 @@ export const gameConfig = {
      * 22 m/s ≈ 79 km/h, 66 m/s ≈ 238 km/h.
      */
     /**
-     * Speed is now player-controlled: gas accelerates, brake decelerates, and
-     * releasing both coasts down. The old automatic ramp is gone — the ramp was
+     * Speed is now player-controlled: gas accelerates, while brake or releasing
+     * gas decelerates. The old automatic ramp is gone — the ramp was
      * what made the run get harder on its own, and that job now belongs to the
      * fuel timer plus the fact that bends can't be held at full speed.
      *
@@ -602,8 +600,11 @@ export const gameConfig = {
         accelerate: 7,
         /** m/s² under brake. Deliberately much stronger than the gas. */
         brake: 14,
-        /** m/s² with neither held. */
-        coastDrag: 3,
+        /**
+         * m/s² applied automatically whenever gas is released. Currently equal
+         * to manual braking; lower this for a gentler engine-braking effect.
+         */
+        autoBrake: 14,
     },
 
     /**
@@ -650,22 +651,6 @@ export const gameConfig = {
         brakeY: 80,
     },
 
-
-    /**
-     * Steering. Free lateral movement clamped to the road edges (§6 D2), with
-     * the lateral velocity itself damped so the car has weight rather than
-     * snapping to the input.
-     */
-    steering: {
-        /** Peak sideways speed, m/s. */
-        maxLateralSpeed: 12,
-        /** Exponential damping rate on lateral velocity — higher = twitchier. */
-        response: 9,
-        /** Cosmetic body roll at full lateral speed, radians. */
-        rollFactor: 0.16,
-        /** Cosmetic nose yaw at full lateral speed, radians. */
-        yawFactor: 0.11,
-    },
 
     /**
      * Scrolling road markers. On a flat placeholder world these are the only
@@ -797,14 +782,32 @@ export const gameConfig = {
             axleOffset: 0.62,
             color: 0x1a1a1e,
         },
-        /**
-         * Exponential damping rate on the car's height, pitch and roll as it
-         * rides the ground — i.e. its suspension. Required, not polish: the
-         * terrain's smallest octave has a 24m wavelength, and at 66 m/s that is
-         * nearly 3 bumps a second. Reading the ground undamped makes the car
-         * jitter hard the moment it leaves the road. Lower = softer.
-         */
-        suspensionRate: 8,
+        /** Rear-pivot steering. Yaw follows input; speed scales only body roll. */
+        steering: {
+            /**
+             * Maximum body direction away from world-forward (about 13 degrees).
+             * Yaw is controlled only by steering input, not speed.
+             */
+            maxYawAngle: 0.22,
+            /** Exponential response toward the requested angle. */
+            response: 9,
+            /** Body lean at maximum steering yaw and `speed.max`. */
+            maxRollAngle: 0.16,
+            /**
+             * Pivot rearward from centre as a fraction of half-length. 0 uses
+             * the centre; 1 uses the rear bumper; 0.62 matches the rear axle.
+             */
+            yawPivotFactor: 0.62,
+        },
+        /** Ground contact and chassis alignment while riding slopes. */
+        suspension: {
+            /** Vertical response toward the tyre-supported body height. */
+            heightResponse: 20,
+            /** Pitch/roll response toward the plane formed by all four tyres. */
+            tiltResponse: 14,
+            /** Maximum visible separation while descending before snapping down. */
+            maxGroundGap: 0.04,
+        },
     },
 
     /**

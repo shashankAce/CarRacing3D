@@ -10,8 +10,8 @@ const TAP_KEYS = ['Space', 'Enter'];
 /**
  * InputController — collapses keyboard and the on-screen buttons into two axes.
  *
- * `axis` is -1 (full left) … +1 (full right); `throttle` is +1 gas, -1 brake, 0
- * coasting. Both are SAMPLED each frame rather than pushed by events, so a held
+ * `axis` is -1 (full left) … +1 (full right); `throttle` is +1 gas, -1 manual
+ * brake, 0 released/automatic brake. Both are SAMPLED each frame, so a held
  * key and a held button behave identically and neither can miss a frame.
  *
  * Keyboard goes through the `inputListener` singleton because KEY_DOWN/KEY_UP
@@ -27,7 +27,7 @@ export class InputController {
     /** -1 … +1 steering. Read by PlayerCar every frame. */
     axis = 0;
 
-    /** +1 gas, -1 brake, 0 coasting. Read by GameState every frame. */
+    /** +1 gas, -1 manual brake, 0 automatic brake. */
     throttle = 0;
 
     /** Set once the player has actually steered — used to hide the hint. */
