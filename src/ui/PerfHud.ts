@@ -101,11 +101,11 @@ export class PerfHud {
     }
 }
 
-/** Which hour the sun was resolved to, so time-of-day can be verified on device. */
+/** Resolved hour, which body is lighting the scene, and the SUN's elevation. */
 function timeOfDayLine(): string {
     const t = resolvedTimeOfDay();
     if (!t) return '';
     const hh = Math.floor(t.hour).toString().padStart(2, '0');
     const mm = Math.floor((t.hour % 1) * 60).toString().padStart(2, '0');
-    return `${t.source} ${hh}:${mm} sun ${t.elevation.toFixed(0)}deg${t.clamped ? '*' : ''}`;
+    return `${t.source} ${hh}:${mm} ${t.light} ${t.sunElevation.toFixed(0)}deg`;
 }

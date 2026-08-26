@@ -36,7 +36,40 @@ export const gameConfig = {
         // `sky.horizonSunsetColor` as the sun drops — so a hand-set fog colour
         // matches only at one sun angle and shows a seam at every other. See
         // `SkyDome.effectiveHorizonColor`.
-        ground: 0x6a9b57,
+        /**
+         * Terrain palette. Grass blends vertically from `grassLow` on valley
+         * floors to `grassHigh` on crests; `dirt` and `rock` then blend in by
+         * slope and altitude (see `terrain.dirtSlope`/`rockSlope`).
+         *
+         * Two couplings to respect when tuning:
+         *
+         *  - **`dirt` and `rock` must differ in HUE, not just brightness.** They
+         *    saturate on the same steep faces, dirt first, so a rock that only
+         *    differs in saturation reads as "washed-out dirt" rather than stone.
+         *    Rock was cool blue-grey for exactly this reason before the
+         *    reference match warmed it, and dirt had to move redder and darker
+         *    to keep the separation. Change one, check the other.
+         *  - **These are pre-fog colours.** A palette that looks right up close
+         *    reads grey at mid-distance, so it has to start more vivid than it
+         *    should look. It was calibrated against a fog that removed 39% of
+         *    the colour by 100m; `world.fogFalloff` now removes ~15% there, so
+         *    it over-delivers. If the near field is garish, desaturate HERE
+         *    rather than thickening the fog, which is doing a different job.
+         *
+         * Olive rather than green, matched to reference/gameplay_ref.jpg: its
+         * grass samples rgb(169,166,77) lit and rgb(141,137,80) mid — red and
+         * green within 4 of each other, i.e. khaki. Ours was rgb(136,196,85),
+         * green 60 above red, and that one ratio is most of why it read as a
+         * different game.
+         */
+        terrain: {
+            // grassLow: 0x87834d,
+            grassLow: 0x6a874d,
+            grassHigh: 0xb7b562,
+            dirt: 0x7a4f2a,
+            // rock: 0xa09272,
+            rock: 0xd3ad89,
+        },
         road: 0x3c3c44,
         roadLine: 0xe8e4cf,
         car: {
@@ -795,6 +828,23 @@ export const gameConfig = {
         /** Raised with `ambientIntensity` lowered, so the LIT level holds while the range widens. */
         sunIntensity: 3.3,
         /**
+         * The moon, which replaces the sun as the light source once the sun sets.
+         * It is placed at the sun's ANTIPODE — opposite azimuth, mirrored
+         * elevation — which is where a FULL moon actually sits, so it rises as
+         * the sun sets and tracks the same arc twelve hours out of phase.
+         *
+         * `moonIntensity` is a fraction of `sunIntensity`, not an absolute. Real
+         * moonlight is ~400,000x weaker than sunlight and would render black, so
+         * this is a stylised "you can still see" level. The colour is cool
+         * because night vision shifts blue — the convention every night scene
+         * follows, even though moonlight is physically sun-coloured.
+         */
+        moonColor: 0xb8c9e8,
+        moonIntensity: 0.35,
+        /** Ambient at night, replacing the low-sun pair once the sun is down. */
+        ambientColorNight: 0x2c3e5e,
+        ambientIntensityNight: 0.5,
+        /**
          * Unit-ish; normalised on use. Behind and to the right of the camera.
          *
          * `y` is the mood dial: the sky shader mixes the horizon toward
@@ -821,52 +871,66 @@ export const gameConfig = {
         timeOfDay: {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
-            /** Hour used by 'fixed' mode, 0-24 and fractional. 13 ~ the approved daylight look. */
-            hour: 19,
+            /** Hour used by 'fixed' mode, 0-24 and fractional. */
+            hour: 4,
             /**
-             * The sun NEVER drops below this, degrees — so 3am renders as the
-             * dusk look rather than as darkness. Non-negotiable for a playable:
-             * it has to sell in two seconds at whatever hour it opens, and it
-             * may be reviewed at any of them.
+             * Observer latitude, degrees. This is a REAL solar position now, not
+             * a stylised arc — latitude sets how high the sun climbs, how fast it
+             * rises, and how far from due-east it comes up. 35 gives a temperate
+             * path; near 0 the sun goes almost overhead and rises nearly
+             * vertically, near 60 it stays low and skims.
              */
-            minElevation: 8,
-            /** Elevation at solar noon, degrees. ~53 reproduces the tuned `sunDirection`. */
-            maxElevation: 53,
-            /** Hours between which the sun rises above the floor. */
-            sunrise: 6,
-            sunset: 19,
+            latitude: 35,
             /**
-             * Azimuth swept across the day, degrees, centred on the tuned
-             * direction — this is what makes morning and evening differ, by
-             * swinging the shadows across the road rather than only shortening
-             * them.
-             *
-             * Past 90 the sun is IN FRONT of the camera: the scene is backlit,
-             * shadows stretch toward the viewer, and `sky.sunGlowColor` finally
-             * renders. That is now deliberate.
-             *
-             * Solved for "the SUNSET sun at the right edge, low".
-             *
-             * Azimuth 0 is straight behind the camera and 180 straight ahead, so
-             * the view centre is 180 and screen-right is the LOW side. The
-             * frame's right edge is 19.2 degrees off centre (half of a ~38 degree
-             * horizontal FOV in portrait), i.e. azimuth ~161. Sunset is dayT 1,
-             * where azimuth is `centre + swing` — hence 135 and 26.
-             *
-             * ELEVATION IS NOT SET HERE, which is the trap. It comes from the
-             * solar arc, and a first attempt aimed at hour 17.5 put the sun at
-             * 18.7 degrees — against a top-of-frame of 22.8, i.e. jammed into the
-             * very top corner and not reading as a sunset at all. Past hour ~18.4
-             * the arc falls under `minElevation` and clamps to 8 degrees, which
-             * is a quarter of the way down the frame and looks like a low sun.
-             * So the sunset LOOK needs `hour` at 19 or later, not merely a late
-             * azimuth.
-             *
-             * Re-solve if you change `sunrise`/`sunset`/`maxElevation`/
-             * `minElevation`, or `camera.fov`: every number here depends on them.
+             * Solar declination, degrees: the season. 0 is an equinox, where the
+             * sun rises due east at 06:00 and sets due west at 18:00. +23.4 is
+             * midsummer (long day, sun rises north of east), -23.4 midwinter.
              */
-            azimuthCenter: 135,
-            azimuthSwing: 26,
+            declination: 0,
+            /**
+             * Angle between the camera's forward axis and the sun AT SUNSET,
+             * degrees. Positive puts it to screen right.
+             *
+             * The one artistic constraint on an otherwise physical path: it
+             * rotates the whole sky so the day ends at the chosen angle, which in
+             * turn fixes the car's compass heading. Sunrise direction, noon
+             * height and how the light swings across the day then all follow from
+             * `latitude` and `declination` rather than being posed separately.
+             *
+             * KEEP THIS AT 40 OR MORE. Because the sun approaches the view axis
+             * monotonically through the afternoon, this value IS its closest
+             * approach while it is above the horizon — which makes it the knob
+             * that decides whether its glow lands in frame.
+             *
+             * And the glow in frame breaks the fog, which is the real constraint
+             * here. Fog can only hide something when the sky behind it is the
+             * same colour, and it is ONE colour. With the sun ahead on the
+             * horizon the sky spans rgb(135,94,39) at the frame edge to
+             * rgb(255,255,221) at the sun — 161/255 of gradient — and no single
+             * value tracks that. Measured: the terrain/sky mismatch at the
+             * skyline was 50/255 with the sun dead ahead, and deriving the fog
+             * from the sky (see `procedural/sky/skyModel.ts`) only brought it to
+             * 48. The fix is not a better fog colour, it is keeping the glow out
+             * of shot.
+             *
+             * Where 40 comes from: the broad lobe is `broadAmp * cos(θ)^broadExp`,
+             * so at the nearest visible direction (offset − 19.2° half-FOV) it is
+             * 0.040 at offset 30 — still visible — and 0.0006 at offset 40, which
+             * is nothing. 60 is comfortably clear.
+             *
+             * The cost is that the sun is never in shot: this buys raking
+             * side-light and long shadows, not a sun you can see. Values from
+             * ~20 to ~160 show neither sun nor moon at any hour. Below ~19 the
+             * sun is in frame and the fog problem above returns.
+             */
+            sunsetOffsetDegrees: 330,
+            /**
+             * Sun elevation, degrees (negative = below horizon), at which night
+             * is fully established: the moon has taken over as the light source
+             * and the sky has reached its night palette. Between 0 and this the
+             * two blend, so dusk is gradual rather than a switch.
+             */
+            twilightEndDegrees: -8,
         },
         /** How far along `sunDirection` the light is placed, metres. */
         sunDistance: 90,
@@ -1062,6 +1126,8 @@ export const gameConfig = {
         zenithDawnColor: 0x1d3a6b,
         /** Zenith after sunset: violet, the classic complement to an orange horizon. */
         zenithSunsetColor: 0x4a3a78,
+        /** Zenith at night. */
+        zenithNightColor: 0x0a1024,
         /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
         zenithLowColor: 0x4a3a78,
         /**
@@ -1107,6 +1173,8 @@ export const gameConfig = {
          * there is has been scattered blue.
          */
         horizonDawnColor: 0x7d8fb3,
+        /** Horizon at night — kept lighter than the zenith, as a real night sky is. */
+        horizonNightColor: 0x1b2740,
         /**
          * RESOLVED AT BOOT — the low-sun horizon colour actually in force, set
          * from `horizonDawnColor` or `horizonSunsetColor`. This, not either of
@@ -1125,6 +1193,46 @@ export const gameConfig = {
          * scene is backlit and shadows point toward the viewer.
          */
         sunGlowColor: 0xfff2c8,
+        /**
+         * Sun glow lobes: a broad halo plus a tight disc, each an amplitude and
+         * a `pow(dot, exp)` exponent. A lobe falls to half at
+         * sqrt(2*ln2/exp) radians, so 84 spans about 15 degrees and 1820 about 3.
+         *
+         * `broadAmp` was 0.5 and clipped. 15 degrees is most of a ±19.2 degree
+         * frame, and 0.5 of a near-white glow on top of an orange horizon lands
+         * well over 1.0, so the entire centre of the sky flattened to pure white
+         * — which is also what stopped the fog matching anything, since a single
+         * fog colour cannot follow a blown-out gradient.
+         *
+         * These are mirrored on the CPU by `procedural/sky/skyModel.ts`, which is
+         * what derives the fog colour, and they are interpolated into the dome's
+         * GLSL from here so there is only one set of numbers.
+         */
+        sunGlow: {
+            broadAmp: 0.18,
+            broadExp: 84,
+            tightAmp: 1.6,
+            tightExp: 1820,
+        },
+        /** Moon disc and halo, same form. 8000 is a ~1.6 degree disc. */
+        moonGlow: {
+            discAmp: 1.6,
+            discExp: 8000,
+            haloAmp: 0.06,
+            haloExp: 300,
+        },
+        /**
+         * Half-width of the arc the FOG COLOUR is averaged over, degrees, at the
+         * horizon.
+         *
+         * The fog is one colour and the sky is not, so it cannot match everywhere
+         * — with the sun in frame the sky spans from dark orange at the frame edge
+         * to white at the sun. Averaging across the visible arc minimises the
+         * worst-case mismatch instead of matching one point perfectly and missing
+         * badly elsewhere. Slightly wider than the frame's own 19.2 so the value
+         * does not lurch as the sun crosses the edge.
+         */
+        fogSampleArcDegrees: 24,
         /**
          * The horizon-to-zenith ramp. ONE curve, deliberately — there is no
          * separate haze band any more.
@@ -1229,6 +1337,8 @@ export const gameConfig = {
             dawnColor: 0x9fb0cc,
             /** Cloud tint after sunset — warm, lit from below by a sun under the horizon. */
             sunsetColor: 0xf0b48a,
+            /** Cloud tint at night. */
+            nightColor: 0x4a5878,
             /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
             lowColor: 0xf0b48a,
             /**
@@ -1247,6 +1357,25 @@ export const gameConfig = {
          * terrain covers — 4 fbm evaluations a pixel is far too much to spend on
          * fragments that get painted over.
          */
+        /**
+         * RESOLVED AT BOOT. How much of a full day the sky is showing: 1 at solar
+         * noon, 0 once the sun is at or below the horizon.
+         *
+         * This replaced blending the sky off `sunDirection.y`, which breaks the
+         * moment the moon becomes the light source — the direction fed to the
+         * lighting is then the MOON's, and its height would brighten the sky
+         * toward the DAY palette at midnight. The sky has to blend off the SUN's
+         * height whatever is currently lighting the scene.
+         */
+        dayFactor: 1,
+        /**
+         * RESOLVED AT BOOT — the true sun and moon directions, independent of
+         * `lighting.sunDirection`, which carries whichever of the two is
+         * currently the light source. The dome needs both regardless of that, or
+         * it cannot gate the sun glow off while drawing the moon.
+         */
+        sunDirection: { x: 0.38, y: 0.80, z: 0.5 },
+        moonDirection: { x: -0.38, y: -0.80, z: -0.5 },
         domeRadius: 350,
     },
 

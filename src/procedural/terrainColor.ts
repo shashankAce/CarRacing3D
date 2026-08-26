@@ -19,9 +19,14 @@ import { smoothstep } from './math';
  */
 
 /**
- * Palette constants, unpacked once at module load.
+ * Palette constants, unpacked once at module load from `colors.terrain`.
  *
- * These go through THREE.Color rather than a hand-rolled `/255`, because
+ * The values live on the config surface rather than here because the ground
+ * colour is the most obviously reskinnable thing in the game; the tuning
+ * couplings (dirt vs rock hue separation, and these being PRE-fog colours) are
+ * documented at that site, where whoever changes them will actually read them.
+ *
+ * They go through THREE.Color rather than a hand-rolled `/255`, because
  * THREE.Color applies the sRGB→linear conversion for the renderer's colour
  * management while a raw byte divide does not. Vertex-colour attributes are
  * consumed as-is (assumed already linear), so hand-unpacking here would make
@@ -29,36 +34,10 @@ import { smoothstep } from './math';
  * use THREE.Color. Per-vertex interpolation below stays plain arithmetic — the
  * allocation-free part is the hot loop, not these four constants.
  */
-// Saturated deliberately: a palette that looks correct up close reads as grey at
-// mid-distance, so the terrain has to start more vivid than it should look.
-//
-// CALIBRATED AGAINST THE OLD FOG, which removed 39% of the colour by 100m.
-// `world.fogFalloff` now removes only 15% there, so this palette over-delivers —
-// if the near field reads garish rather than vivid, desaturate HERE rather than
-// thickening the fog, which is doing a different job (see fogCurve.ts).
-// Olive rather than green, matched to reference/gameplay_ref.jpg the same way as the
-// foliage: reference hue and saturation, our lightness. Sampled grass there is
-// rgb(169,166,77) lit and rgb(141,137,80) mid — red and green within 4 of each
-// other, i.e. khaki. Ours was rgb(136,196,85), green 60 above red.
-const GRASS_LOW = new THREE.Color(0x87834d);
-const GRASS_HIGH = new THREE.Color(0xb7b562);
-// Pushed redder and darker because ROCK moved (see below): dirt and rock share
-// the same steep faces, so they have to stay separated in HUE, and rock going
-// warm would otherwise put them back on top of each other.
-const DIRT = new THREE.Color(0x7a4f2a);
-/**
- * Warm tan, from the reference's cliffs — sampled rgb(146,131,98) mid and
- * rgb(180,156,105) lit.
- *
- * This REVERSES an earlier decision, so the reasoning matters. Rock was moved
- * to a cool blue-grey (0x83888f) because against DIRT's brown — same steep
- * faces, applied first — a warm grey differed only in saturation and read as
- * "washed-out dirt" rather than stone. That problem is real and still applies;
- * the fix here is to keep the HUE SEPARATION but take it from the other side,
- * pushing DIRT redder and darker instead of pulling rock cool. Change one of
- * these two and check the other, or the band stops being legible.
- */
-const ROCK = new THREE.Color(0xa09272);
+const GRASS_LOW = new THREE.Color(cfg.colors.terrain.grassLow);
+const GRASS_HIGH = new THREE.Color(cfg.colors.terrain.grassHigh);
+const DIRT = new THREE.Color(cfg.colors.terrain.dirt);
+const ROCK = new THREE.Color(cfg.colors.terrain.rock);
 
 /** High-contrast band colours for `debug.showSlopeBands`. */
 const DEBUG_GRASS = new THREE.Color(0x0033ff);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
+import { deriveFogColor } from './skyModel';
 
 /**
  * SkyDome — a large inverted sphere with an analytic gradient, a sun glow and a
@@ -39,19 +40,25 @@ import { gameConfig as cfg } from '../../config/gameConfig';
  *    `sky.domeRadius` and `camera.far`.
  */
 /**
- * How high the sun sits, 0 (on the horizon) to 1 (overhead). The single number
- * every day/night blend is driven by — sky horizon, sky zenith, cloud tint and
- * the derived fog all read it, so they cannot drift apart.
+ * How much of a full day the sky is showing: 1 at solar noon, 0 once the sun is
+ * down. The single number every day/night blend is driven by — sky horizon, sky
+ * zenith, cloud tint and the derived fog all read it, so they cannot drift apart.
+ *
+ * It comes from `resolveTimeOfDay`, computed from the SUN's height, and NOT from
+ * `lighting.sunDirection` as it once did. That direction carries whichever body
+ * is currently the light source, so at night it is the moon's — and blending the
+ * sky on the moon's height brightens midnight toward the DAY palette.
  */
-export function sunHeight(): number {
-    const d = cfg.lighting.sunDirection;
-    const len = Math.hypot(d.x, d.y, d.z) || 1;
-    return Math.max(0, Math.min(1, d.y / len));
+export function dayFactor(): number {
+    return Math.max(0, Math.min(1, cfg.sky.dayFactor));
 }
 
+/**
+ * @deprecated Kept as a thin alias so older call sites still read. The fog is no
+ * longer "the horizon colour" — see `skyModel.deriveFogColor`.
+ */
 export function effectiveHorizonColor(): THREE.Color {
-    return new THREE.Color(cfg.sky.horizonLowColor)
-        .lerp(new THREE.Color(cfg.sky.horizonColor), sunHeight());
+    return deriveFogColor();
 }
 
 export class SkyDome {
@@ -61,11 +68,15 @@ export class SkyDome {
 
     constructor(scene: THREE.Scene) {
         const s = cfg.sky;
-        const sun = cfg.lighting.sunDirection;
+        // The TRUE sun and moon, not the lighting direction — the dome has to
+        // draw the moon while gating the sun's glow off, so it needs both
+        // regardless of which one is lighting the scene.
+        const sun = s.sunDirection;
+        const moon = s.moonDirection;
 
         this._material = new THREE.ShaderMaterial({
             vertexShader: VERTEX_SHADER,
-            fragmentShader: FRAGMENT_SHADER,
+            fragmentShader: buildFragmentShader(),
             uniforms: {
                 uZenithColor: { value: new THREE.Color(s.zenithColor) },
                 uZenithLowColor: { value: new THREE.Color(s.zenithLowColor) },
@@ -73,8 +84,11 @@ export class SkyDome {
                 uHorizonSunsetColor: { value: new THREE.Color(s.horizonLowColor) },
                 uSunGlowColor: { value: new THREE.Color(s.sunGlowColor) },
                 uSunDirection: { value: new THREE.Vector3(sun.x, sun.y, sun.z).normalize() },
+                uMoonDirection: { value: new THREE.Vector3(moon.x, moon.y, moon.z).normalize() },
+                uMoonColor: { value: new THREE.Color(cfg.lighting.moonColor) },
                 uSkyTopHeight: { value: s.skyTopHeight },
                 uHorizonHold: { value: s.horizonHold },
+                uDayFactor: { value: s.dayFactor },
             },
             side: THREE.BackSide,
             depthWrite: false,
@@ -114,6 +128,24 @@ void main() {
 }
 `;
 
+/**
+ * Substitutes the glow constants from config into the shader source, so the
+ * numbers exist in exactly one place and `skyModel.ts` reads the same ones.
+ * GLSL needs float literals, hence toFixed(1) on the amplitudes.
+ */
+function buildFragmentShader(): string {
+    const g = cfg.sky.sunGlow, m = cfg.sky.moonGlow;
+    return FRAGMENT_SHADER
+        .replace(/SUN_BROAD_EXP/g, g.broadExp.toFixed(1))
+        .replace(/SUN_BROAD_AMP/g, g.broadAmp.toFixed(4))
+        .replace(/SUN_TIGHT_EXP/g, g.tightExp.toFixed(1))
+        .replace(/SUN_TIGHT_AMP/g, g.tightAmp.toFixed(4))
+        .replace(/MOON_DISC_EXP/g, m.discExp.toFixed(1))
+        .replace(/MOON_DISC_AMP/g, m.discAmp.toFixed(4))
+        .replace(/MOON_HALO_EXP/g, m.haloExp.toFixed(1))
+        .replace(/MOON_HALO_AMP/g, m.haloAmp.toFixed(4));
+}
+
 const FRAGMENT_SHADER = /* glsl */`
 varying vec3 vLocalPosition;
 uniform vec3 uZenithColor;
@@ -122,8 +154,11 @@ uniform vec3 uHorizonColor;
 uniform vec3 uHorizonSunsetColor;
 uniform vec3 uSunGlowColor;
 uniform vec3 uSunDirection;
+uniform vec3 uMoonDirection;
+uniform vec3 uMoonColor;
 uniform float uSkyTopHeight;
 uniform float uHorizonHold;
+uniform float uDayFactor;
 
 void main() {
     vec3 dir = normalize(vLocalPosition);
@@ -131,14 +166,16 @@ void main() {
 
     // The horizon warms toward sunset orange as the sun drops, on both sides of
     // the sky — stylised, not a scattering model.
-    float sunHeight = clamp(uSunDirection.y, 0.0, 1.0);
-    vec3 horizon = mix(uHorizonSunsetColor, uHorizonColor, sunHeight);
+    // Blended on uDayFactor, which comes from the SUN's height. Using the light
+    // direction's y instead -- the obvious thing -- brightens midnight toward the
+    // day palette, because after sunset that direction is the MOON's.
+    vec3 horizon = mix(uHorizonSunsetColor, uHorizonColor, uDayFactor);
     // The zenith tracks the sun too. Blending only the horizon left the top of
     // the sky midday-blue under a sunset, which is the one part of a low-sun sky
     // people actually notice is wrong. Done in the shader rather than resolved
     // on the CPU so it mixes in LINEAR space, exactly like the horizon above --
     // two blends of the same pair in different spaces drift apart visibly.
-    vec3 zenith = mix(uZenithLowColor, uZenithColor, sunHeight);
+    vec3 zenith = mix(uZenithLowColor, uZenithColor, uDayFactor);
 
     // ONE monotone ramp from the fog colour at the horizon to the zenith.
     //
@@ -159,8 +196,22 @@ void main() {
     float t = pow(smoothstep(0.0, uSkyTopHeight, max(h, 0.0)), uHorizonHold);
     vec3 sky = mix(horizon, zenith, t);
 
+    // Sun glow, faded out as the sun goes under rather than switched, so an hour
+    // just after sunset still has light lingering where it went down.
+    //
+    // The amplitudes and exponents are interpolated from sky.sunGlow/moonGlow so
+    // that skyModel.ts -- which mirrors this shader on the CPU to derive the fog
+    // colour -- reads the same numbers. Do not hardcode them here.
+    float sunUp = smoothstep(-0.07, 0.02, uSunDirection.y);
     float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
-    sky += uSunGlowColor * (pow(sunDot, 84.0) * 0.5 + pow(sunDot, 1820.0) * 2.0);
+    sky += uSunGlowColor * sunUp * (pow(sunDot, SUN_BROAD_EXP) * SUN_BROAD_AMP + pow(sunDot, SUN_TIGHT_EXP) * SUN_TIGHT_AMP);
+
+    // The moon: a tight disc plus a soft halo, gated the same way. A lobe falls
+    // to half at sqrt(2*ln2/exp) radians, so the exponent sets its angular size
+    // and does the work a texture would, for a few ALU.
+    float moonUp = smoothstep(-0.02, 0.05, uMoonDirection.y);
+    float moonDot = max(dot(dir, normalize(uMoonDirection)), 0.0);
+    sky += uMoonColor * moonUp * (pow(moonDot, MOON_DISC_EXP) * MOON_DISC_AMP + pow(moonDot, MOON_HALO_EXP) * MOON_HALO_AMP);
 
     gl_FragColor = vec4(sky, 1.0);
 
