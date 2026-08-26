@@ -11,6 +11,20 @@ npm run dev
 
 Then open http://localhost:8000 (falls back to the next free port if 8000 is taken). Edit `src/index.js` (or `src/index.ts`) and reload.
 
+## Current gameplay
+
+The playable loop is an infinite portrait road run: steer around slower traffic,
+cut past vehicles for bonus points, and keep the car moving before fuel runs out.
+Keyboard controls are Arrow keys or WASD; hold left/right to steer, Up/W to
+accelerate, and Down/S to brake. The browser build also shows four hold-to-act
+touch buttons and accepts Space/Enter to restart after a run ends.
+
+The player car uses rear-pivot steering with speed-derived lateral movement and
+is grounded from its tyre footprint. Traffic is pooled into 16 vehicles; lane
+changes signal, reserve a destination gap, and smoothly yaw into the crossing.
+The current environment uses four terrain chunks across the view, a fixed 14:00
+time-of-day preview, taller low-poly trees, and 12m road clearance.
+
 ## Build
 
 ```

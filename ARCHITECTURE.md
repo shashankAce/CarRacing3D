@@ -16,7 +16,8 @@ creative**, used as a **reskinnable B2B template**.
 
 - Player car drives forward forever; left/right controls steer across the road.
 - Traffic vehicles spawn ahead and are dodged ("cut traffic as long as you can").
-- Speed ramps from a start value up to a capped maximum over time.
+- Player-controlled speed rises under gas, falls under brake or released gas,
+  and is capped by the configured maximum.
 - The 3D environment (terrain, trees, rocks) is **generated procedurally at
   runtime from a seed** — no mesh/texture assets — because the size budget is 2MB.
 - Cars are **colored boxes for now**; FBX/GLB models get swapped in later
@@ -397,17 +398,39 @@ Only measure-then-fix. `showStats: true` plus a `performance.now()` timer around
 the chunk build is the whole instrumentation needed.
 
 ### 5.4 Traffic: pooled nodes, not instancing
-Traffic count is small (~20-30 alive). **Use a pre-allocated pool of `Mesh3D`
-nodes** sharing one `BoxGeometry` and a handful of materials — not an
-InstancedMesh. Reasons: it's already one draw call per material at this count,
-per-object logic stays readable, and **swapping in an FBX/GLB later is a
-one-line `object3D` assignment** instead of an instancing redesign. Never
-create/destroy at runtime; recycle from the pool.
+Traffic uses a fixed pool of **16** `Mesh3D` nodes sharing one unit
+`BoxGeometry` and one material per vehicle type — not an `InstancedMesh`.
+At this count the pool is already only one draw call per material, while
+per-object lane logic stays readable and swapping in an FBX/GLB later remains a
+one-line `object3D` assignment. Never create/destroy vehicles at runtime;
+recycle the pool.
+
+Vehicles normally travel on lane centres. When a faster vehicle catches a
+slower one, it signals for `0.9s`, reserves a destination lane, then crosses at
+`0.85` lanes/second. The clearance test sweeps the relative gap through both
+the signalling and crossing intervals, so it rejects a lane that is safe now
+but will be occupied when the manoeuvre completes. If the gap closes during
+the signal, the manoeuvre is cancelled; if no lane is safe, the vehicle slows
+to match. `laneYaw` follows the actual lateral path and eases back to the road
+heading, capped at `0.24` radians.
+
+Placement now samples the four yawed footprint corners to derive pitch and
+roll, then uses a nine-point footprint test for the lowest supported body
+height. This keeps long vehicles grounded over crests, dips and lane changes;
+the previous single centre-height sample made them float or clip.
 
 ### 5.5 Collision: hand-rolled, in 2D
-Everything is axis-aligned, one player, ~30 obstacles, and gameplay is on the
-XZ plane. A `for` loop over the active pool doing an interval-overlap test on
-(x, z) is ~10 lines, deterministic, and frame-exact.
+Everything is axis-aligned, one player, and at most sixteen traffic obstacles;
+gameplay is on the XZ plane. A `for` loop over the active pool doing an
+interval-overlap test on (x, z) is deterministic and frame-exact. Y is still
+ignored deliberately: all vehicles share the drivable surface, so a height
+test would create a way to drive through a bus on a slope.
+
+The player now has a small render-space Z offset while steering around its
+rear pivot. Collision converts that pose back to the player's absolute world Z
+with `travelled - car.position.z` before comparing it with each traffic
+vehicle's `worldZ`. This keeps collision timing aligned with the visual pose
+without turning the cheap AABB test into a rotated-body test.
 
 Prefer that over `AABBAdapter`. Switch to `AABBAdapter` only if we later want
 engine-managed colliders, raycasts, or gravity — it's the sanctioned zero-weight
@@ -433,9 +456,19 @@ Hold-to-steer, both input paths always live:
 - Touch: two `Input.POINTER_DOWN`/`POINTER_UP` regions (or screen halves) — plus
   a drag-to-steer path, which tests better on mobile playables.
 
-Steering integrates a lateral velocity with clamping to the road edges, plus a
-small visual roll/yaw on the car body for feel. Not instant lane snapping unless
-D2 (§6) says otherwise.
+The player axis drives a damped steering yaw, not a free lateral velocity.
+The current car reaches `0.22` radians at full input, with a rear pivot at
+`0.62` of the half-length. Lateral movement is derived from that same yaw as
+`-tan(yaw) * speed * dt`, so the body direction and travel direction agree and
+there is no sideways slip. Absolute X is still clamped to the moving road
+edges; the car never follows a bend without input. Steering roll is speed-scaled
+for feel, while the road's pitch and roll come from the actual tyre contacts.
+
+The body uses exponential response for yaw, tilt and height. Its ground floor
+is the maximum required height over a nine-point yawed footprint, with a
+`0.04m` maximum downward gap while the suspension catches a falling surface.
+This prevents both penetration on rising ground and visible floating on
+descents.
 
 ### 5.7a The mistake that recurred three times: frequency vs. visible distance
 
@@ -492,7 +525,8 @@ The method used in Phase 4, worth reusing for any later balance question:
    arithmetic on `worldZ`, no engine needed).
 2. Add a **greedy driver**: each step, sample ~40 lateral positions, score each
    by clearance to the nearest blocking vehicle within a lookahead, and steer
-   toward the best with the game's real `maxLateralSpeed` and damping.
+   toward the best with the game's current yaw-derived lateral path and
+   exponential steering response.
 3. Run 100km+ per configuration and count crashes — but separately count
    crashes where **no lateral position on the road was safe**. That second
    number is the one that matters; it's the unwinnable case.
@@ -738,12 +772,12 @@ not assumptions to revisit.
 | # | Decision | Settled as |
 |---|---|---|
 | D1 | Which ad target is the 2MB from? | **`meta-playables`** — 2MB raw single HTML, no network requests. Everything here is built to its rules, which satisfies every other network too. |
-| D2 | Discrete lane snapping vs free lateral steering? | **Free lateral steering** with clamping to the road edges, plus a visual roll on the car. Traffic still spawns on lane centres. |
+| D2 | Discrete lane snapping vs free lateral steering? | **Free lateral steering** with clamping to the road edges. Input drives a rear-pivot yaw and derives lateral movement from it; speed scales the visual roll. Traffic still spawns on lane centres. |
 | D3 | How rich are the trees? | **RESOLVED 2026-08-26: fallback taken.** P3W's generator measures **38,900 triangles and 2.9MB per tree** (its own cheap `ringDetail: 0.4` tier only reaches 38,216 — that thins branch rings, and the triangles are in the foliage). The whole scene runs ~40k triangles. Low-poly geometry is used instead, ~60 triangles a tree; everything else from P3W (scatter, instancing, vertex colour, proportions) is kept. Original plan below. |
 | D3-orig | *(superseded)* | **Port, then measure.** Start with P3W's generator at its cheap `ringDetail: 0.4` tier and a **3-variant** pool, and measure both boot-time generation cost and frame cost. If either is material, fall back to a simple cone/sphere tree — at this camera distance the full skeleton may be invisible detail we're paying full price for. |
 | D4 | Portrait 720×1280? | **Yes** — matches the existing scaffold and `pack:google-playables --orientation=portrait`. |
 | D5 | Does the car follow a curving road on its own? | **No.** Settled 2026-08-25 after trying both. The car's lateral position is ABSOLUTE and only steering moves it; the clamp to the asphalt is what tracks the curve. So holding a bend takes input, and reaching an edge is a collision that shoves the car along it. Storing the car's position as an offset from the road centre was tried and rejected — it carried the car through bends with no input, making the curve decoration. |
-| D7 | Is speed automatic or player-controlled? | **Player-controlled** (Phase 5). Gas/brake, with a floor at `speed.min` deliberately set ABOVE the fastest traffic so vehicles can never overtake from behind and hit the player from a direction they cannot see. |
+| D7 | Is speed automatic or player-controlled? | **Player-controlled** (Phase 5). Gas accelerates, manual brake decelerates, and releasing gas applies automatic braking. Current tuning is `30/24/66 m/s` for start/min/max; the coupe can reach `26 m/s`, so the old “minimum above all traffic” invariant is no longer exact and must be rechecked if rear encounters become a problem. |
 | D8 | What ends a run besides crashing? | **Fuel**, draining on TIME rather than distance. Constant per-second burn means distance-per-tank is maximised by speed, which pushes the player to rush. Per-metre would make speed neutral; per-throttle would reward coasting. |
 | D6 | Can the car leave the road? | **No** — it clamps at the asphalt edge. But it rides `surfaceHeightAt` and has real suspension, so the code already behaves correctly if that ever changes. |
 
@@ -811,8 +845,8 @@ Every tunable lives in one file (`src/config/gameConfig.ts`) — nothing else in
 the codebase holds a magic number:
 
 - **Palette**: terrain color bands, road/lane colors, sky/fog, car colors, HUD.
-- **Feel**: start/max speed, acceleration curve, steering rate, camera offset
-  and damping, road width, lane count.
+- **Feel**: start/min/max speed, gas/brake response, steering yaw and rear-pivot
+  response, suspension, camera offset and damping, road width, lane count.
 - **World**: seed, chunk size/resolution/draw distance, tree & rock density,
   `roadCenterX` curvature amplitude, biome band thresholds.
 - **Content**: traffic spawn rate curve, vehicle type mix and dimensions.
@@ -833,11 +867,11 @@ src/
   config/gameConfig.ts      # THE reskin surface — every tunable, nothing else
   scenes/GameScene.ts        # owns systems, fixed update order
   game/
-    PlayerCar.ts             # steering, lateral clamp, visual roll
+    PlayerCar.ts             # rear-pivot steering, lateral clamp, suspension
     FollowCamera.ts           # TPP damping
     TrafficSystem.ts          # pool, spawn, recycle
     Collision.ts               # hand-rolled AABB over the active pool
-    GameState.ts               # speed ramp, travelled, score, game over
+    GameState.ts               # throttle speed, fuel, travelled, game over
   world/
     WorldScroll.ts            # the `travelled` scalar, world→render offset
     roadPath.ts                # roadCenterX(z), roadHalfWidth
@@ -1045,3 +1079,21 @@ src/
   All three sign bugs were found that way and none would have survived to the
   owner; the two failures above are both cases where I reasoned instead of
   measuring.
+
+- **2026-08-26** — **Gameplay and geometry tuning.** `ca488ac` moved the fixed
+  preview to 14:00, raised the low-poly tree range from 8–14m to 8–16m, and
+  reduced roadside clearance from 15m to 12m. `dd12dc9` reduced the terrain
+  window from six to four chunks across; the draw distance remains fog-coupled
+  at seven chunks ahead. These are config-only changes intended to make the
+  gameplay reference read correctly while lowering resident terrain cost.
+- **2026-08-26** — **Car and traffic handling rebuilt** (`faf61ac`). Player
+  steering now uses a damped rear-pivot yaw (`0.22` rad max) and derives lateral
+  movement from yaw and speed instead of integrating a sideways velocity. The
+  car and traffic now use yawed tyre/footprint samples for pitch, roll and
+  ground support, with bounded suspension travel. Traffic lane selection now
+  reserves target lanes and sweeps relative gaps through signalling and
+  crossing; lane-change yaw follows the actual path. Collision accounts for the
+  player's render-space Z offset before comparing absolute world positions.
+  Releasing gas now applies `autoBrake` (`14 m/s²`), matching manual braking;
+  `coastDrag` is gone. No new runtime dependency or physics system was
+  introduced.
