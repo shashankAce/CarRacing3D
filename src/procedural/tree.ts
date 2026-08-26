@@ -100,7 +100,22 @@ export function createTreeMaterial(): THREE.MeshStandardMaterial {
     return new THREE.MeshStandardMaterial({
         color: 0xffffff,
         vertexColors: true,
-        roughness: 0.85,
+        /**
+         * 0.5, down from 0.85, to get a visible specular lobe on the facets
+         * that face the sun. That highlight is most of what reads as "material"
+         * on the reference's trees — at 0.85 the lobe is so broad and dim that
+         * the cones were pure diffuse, which is what made them look like flat
+         * painted shapes rather than lit surfaces.
+         *
+         * `metalness` stays at its default 0, and must. It looks like the knob
+         * for this and is the opposite: metalness drives diffuse toward zero and
+         * makes the surface reflect its environment instead, and with no
+         * environment map in this scene there is nothing to reflect — a metallic
+         * tree renders nearly black. The dielectric specular a metalness-0
+         * surface already has (F0 0.04) is the correct thing to widen here, and
+         * roughness is its dial.
+         */
+        roughness: 0.4,
         // Flat shading suits the low-poly look and means the cones read as
         // faceted tiers instead of smooth blobs.
         flatShading: true,

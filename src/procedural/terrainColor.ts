@@ -36,17 +36,29 @@ import { smoothstep } from './math';
 // `world.fogFalloff` now removes only 15% there, so this palette over-delivers —
 // if the near field reads garish rather than vivid, desaturate HERE rather than
 // thickening the fog, which is doing a different job (see fogCurve.ts).
-const GRASS_LOW = new THREE.Color(0x4d9440);
-const GRASS_HIGH = new THREE.Color(0x88c455);
-const DIRT = new THREE.Color(0x8b6a38);
+// Olive rather than green, matched to res/gameplay_ref.jpg the same way as the
+// foliage: reference hue and saturation, our lightness. Sampled grass there is
+// rgb(169,166,77) lit and rgb(141,137,80) mid — red and green within 4 of each
+// other, i.e. khaki. Ours was rgb(136,196,85), green 60 above red.
+const GRASS_LOW = new THREE.Color(0x87834d);
+const GRASS_HIGH = new THREE.Color(0xb7b562);
+// Pushed redder and darker because ROCK moved (see below): dirt and rock share
+// the same steep faces, so they have to stay separated in HUE, and rock going
+// warm would otherwise put them back on top of each other.
+const DIRT = new THREE.Color(0x7a4f2a);
 /**
- * Rock is deliberately a cool blue-grey rather than the warm neutral it started
- * as (0x8d8880). Against the brown of DIRT — which saturates on the same steep
- * faces rock does, and is applied first — a warm grey differed mostly in
- * saturation, so even at a full blend it read as "slightly washed-out dirt"
- * rather than as stone. Hue separation is what makes the band legible.
+ * Warm tan, from the reference's cliffs — sampled rgb(146,131,98) mid and
+ * rgb(180,156,105) lit.
+ *
+ * This REVERSES an earlier decision, so the reasoning matters. Rock was moved
+ * to a cool blue-grey (0x83888f) because against DIRT's brown — same steep
+ * faces, applied first — a warm grey differed only in saturation and read as
+ * "washed-out dirt" rather than stone. That problem is real and still applies;
+ * the fix here is to keep the HUE SEPARATION but take it from the other side,
+ * pushing DIRT redder and darker instead of pulling rock cool. Change one of
+ * these two and check the other, or the band stops being legible.
  */
-const ROCK = new THREE.Color(0x83888f);
+const ROCK = new THREE.Color(0xa09272);
 
 /** High-contrast band colours for `debug.showSlopeBands`. */
 const DEBUG_GRASS = new THREE.Color(0x0033ff);

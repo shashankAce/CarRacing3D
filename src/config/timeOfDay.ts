@@ -66,9 +66,14 @@ export function resolveTimeOfDay(): ResolvedTimeOfDay {
     const elevation = Math.max(t.minElevation, uncapped);
 
     // Azimuth sweeps so morning and evening differ by shadow DIRECTION, not
-    // only shadow length. Hard-clamped below 90 degrees: past that the sun
-    // crosses in front of the camera and the scene silently turns backlit.
-    const swing = Math.min(t.azimuthSwing, 89 - Math.abs(t.azimuthCenter));
+    // only shadow length.
+    //
+    // This used to be clamped below 90 degrees to keep the sun BEHIND the camera
+    // — past 90 the scene turns backlit and the sun enters frame. That is now
+    // the intended look, so the clamp only keeps the sweep inside 0..180, i.e.
+    // on the +X (screen-right) side. Crossing either end would swing the sun to
+    // the left of frame mid-day, which no configuration wants.
+    const swing = Math.min(t.azimuthSwing, Math.min(t.azimuthCenter, 180 - t.azimuthCenter));
     const azimuth = t.azimuthCenter + swing * (dayT * 2 - 1);
 
     const elevRad = elevation * Math.PI / 180;

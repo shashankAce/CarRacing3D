@@ -431,6 +431,47 @@ export const gameConfig = {
         segmentsPerBand: 4,
         /** Lift above `road.level` — coplanar surfaces z-fight. */
         lift: 0.02,
+        /**
+         * Asphalt surface, generated at boot — see `procedural/roadTexture.ts`.
+         *
+         * `tileMeters` MUST divide `bandLength` evenly. UVs are local to a 20m
+         * band and every recycled band carries identical ones, so a tile length
+         * that does not divide cleanly puts a hard line across the road every
+         * band boundary.
+         */
+        texture: {
+            size: 128,
+            /** World metres per texture repeat. 4 divides bandLength 20 exactly. */
+            tileMeters: 4,
+            /**
+             * Fine aggregate depth. 0.10 gives roughly the reference's 5%
+             * modulation (sd 5.24/255 on a mean of 99). The first pass used 0.22
+             * with a one-sided clamp down to 0.45, i.e. ~20x the reference's
+             * contrast, which read as noise painted on rather than as asphalt.
+             */
+            grain: 0.32,
+            /**
+             * Faint lengthwise streak. Nearly zero on purpose: the reference's
+             * horizontal and vertical gradients differ by only 4%, so asphalt is
+             * essentially isotropic and the earlier 4:1 stretch was a guess that
+             * the measurement did not support.
+             */
+            streak: 0.12,
+        },
+        /**
+         * A LITTLE metallic, which only works because the road gets an
+         * environment map (`procedural/skyEnv.ts`). Metalness drives diffuse to
+         * zero and reflects the environment instead, so without one this would
+         * render the road nearly black rather than glossy. 0.18 is enough for
+         * the asphalt to pick up the sky and go slightly cooler in the distance,
+         * which is what the reference's road does; much more and it stops
+         * reading as a surface at all.
+         */
+        metalness: 0.10,
+        /** Down from 0.88, for a visible specular lobe from the sun. */
+        roughness: 0.78,
+        /** Sky reflection strength. Below 1 because asphalt is not a mirror. */
+        envIntensity: 0.35,
     },
 
     /**
@@ -712,7 +753,23 @@ export const gameConfig = {
          * look is preserved rather than approximated.
          */
         ambientColor: 0x8ba6bd,
-        ambientIntensity: 0.8,
+        /**
+         * 0.55, down from 0.8, with `sunIntensity` raised to compensate — the
+         * pair stretches dynamic range rather than changing overall exposure.
+         *
+         * Measured against res/gameplay_ref.jpg with the same foliage filter and
+         * the same percentiles on both images: the reference spans 5.0x from its
+         * darkest to brightest foliage, ours spanned 3.5x. Our lit level was
+         * already close; it was the shadow side sitting too high, which is what
+         * makes low-poly cones read as flat painted shapes instead of lit
+         * surfaces. Ambient is the floor under every shadowed face, so it is the
+         * only thing that sets how dark the dark side can get.
+         *
+         * Careful: this is also the floor under the terrain and the cars, and
+         * `timeOfDay` interpolates from `ambientIntensityLow` to this value, so
+         * lowering it steepens that curve as well as darkening midday shadow.
+         */
+        ambientIntensity: 0.55,
         /**
          * Ambient at the sun's floor. A low sun stops filling the scene: at 9
          * degrees an upward terrain normal gets N.L ~ 0.16, so the sun's
@@ -735,7 +792,8 @@ export const gameConfig = {
         ambientColorLowDawn: 0x93a6c4,
         ambientIntensityLow: 1.75,
         sunColor: 0xfff2dd,
-        sunIntensity: 2.9,
+        /** Raised with `ambientIntensity` lowered, so the LIT level holds while the range widens. */
+        sunIntensity: 3.3,
         /**
          * Unit-ish; normalised on use. Behind and to the right of the camera.
          *
@@ -764,7 +822,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. 13 ~ the approved daylight look. */
-            hour: 2,
+            hour: 19,
             /**
              * The sun NEVER drops below this, degrees — so 3am renders as the
              * dusk look rather than as darkness. Non-negotiable for a playable:
@@ -783,14 +841,32 @@ export const gameConfig = {
              * swinging the shadows across the road rather than only shortening
              * them.
              *
-             * HARD LIMIT: centre + swing must stay under 90, or the sun crosses
-             * in FRONT of the camera and the scene turns backlit with shadows
-             * stretching toward the viewer. That is a legitimate look, but it
-             * should be chosen, not arrived at by widening a number. (It is also
-             * the only way `sky.sunGlowColor` ever renders — see its note.)
+             * Past 90 the sun is IN FRONT of the camera: the scene is backlit,
+             * shadows stretch toward the viewer, and `sky.sunGlowColor` finally
+             * renders. That is now deliberate.
+             *
+             * Solved for "the SUNSET sun at the right edge, low".
+             *
+             * Azimuth 0 is straight behind the camera and 180 straight ahead, so
+             * the view centre is 180 and screen-right is the LOW side. The
+             * frame's right edge is 19.2 degrees off centre (half of a ~38 degree
+             * horizontal FOV in portrait), i.e. azimuth ~161. Sunset is dayT 1,
+             * where azimuth is `centre + swing` — hence 135 and 26.
+             *
+             * ELEVATION IS NOT SET HERE, which is the trap. It comes from the
+             * solar arc, and a first attempt aimed at hour 17.5 put the sun at
+             * 18.7 degrees — against a top-of-frame of 22.8, i.e. jammed into the
+             * very top corner and not reading as a sunset at all. Past hour ~18.4
+             * the arc falls under `minElevation` and clamps to 8 degrees, which
+             * is a quarter of the way down the frame and looks like a low sun.
+             * So the sunset LOOK needs `hour` at 19 or later, not merely a late
+             * azimuth.
+             *
+             * Re-solve if you change `sunrise`/`sunset`/`maxElevation`/
+             * `minElevation`, or `camera.fov`: every number here depends on them.
              */
-            azimuthCenter: 37,
-            azimuthSwing: 43,
+            azimuthCenter: 135,
+            azimuthSwing: 26,
         },
         /** How far along `sunDirection` the light is placed, metres. */
         sunDistance: 90,
@@ -806,7 +882,16 @@ export const gameConfig = {
          * FOLLOWS the car, so this bounds the near field, not the draw distance.
          */
         shadows: {
-            enabled: false,
+            /**
+             * Re-enabled to be re-measured. These were switched OFF in the
+             * "back to 60fps on device" pass, but at 1024/70m — the numbers
+             * below are the tuned-down replacements that were never actually
+             * verified with shadows on. Depth-pass fill scales with mapSize^2,
+             * so 512 is a quarter of what was measured as costing ~8.9ms.
+             * Check `frame` and `worst` on the phone; if it regresses, this
+             * flag is the one to flip, not the map size.
+             */
+            enabled: true,
             /**
              * 512, not 1024. Measured at ~8.9ms a frame on a low-end phone at
              * 1024 with a 70m frustum — a third of a 42ms regression. Halving
@@ -852,9 +937,34 @@ export const gameConfig = {
         tiersMax: 4,
         trunkSegments: 5,
         canopySegments: 6,
-        trunkColor: 0x51402c,
-        foliageLowColor: 0x2f4a2e,
-        foliageHighColor: 0x5f8a45,
+        /**
+         * Matched to res/gameplay_ref.jpg by taking the reference's HUE and
+         * SATURATION and keeping our own lightness — the reference values are
+         * final rendered pixels, already lit and fogged, so pasting them into
+         * base-colour slots would double-count the exposure.
+         *
+         * The hue is the whole point. Sampled foliage there is olive: lit
+         * rgb(113,117,70), where red and green are within 4 of each other. Ours
+         * was rgb(95,138,69), green a clear 43 above red. That single ratio is
+         * why the reference trees "feel different" despite being the same
+         * low-poly shape — it reads as warm light on foliage, not as emerald.
+         *
+         * These are then RAISED for exposure. Getting the hue right left the
+         * trees too dark: measured foliage rendered at a median rgb(64,75,57)
+         * against the reference's lit rgb(113,117,70). The cause is not ambient
+         * light drowning the sun — measured contrast across our own foliage is
+         * 2.7x, against 1.5x in the reference, so if anything ours is the more
+         * directional of the two. It is simply that a Lambert diffuse term
+         * divides irradiance by pi, so a camera-facing face ends up at ~0.50x
+         * its albedo, and the albedo was too low to survive it.
+         *
+         * Blue is raised less than red and green on purpose: `ambientColor` is a
+         * cool blue, so the unlit side drifts blue, and holding blue back in the
+         * albedo is what keeps the olive reading in shadow as well as in light.
+         */
+        trunkColor: 0x5c4a42,
+        foliageLowColor: 0x485b38,
+        foliageHighColor: 0xa4aa58,
 
         /** Average metres between placement candidates, before rejection. */
         spacing: 18,
@@ -947,13 +1057,29 @@ export const gameConfig = {
          * the sun drops, the same way it blends the horizon — so the top of the
          * sky tracks time of day instead of staying midday blue under a sunset.
          */
-        zenithColor: 0x2b6ad4,
+        zenithColor: 0x4a94b8,
         /** Zenith before sunrise: deep, cool, still holding night. */
         zenithDawnColor: 0x1d3a6b,
         /** Zenith after sunset: violet, the classic complement to an orange horizon. */
         zenithSunsetColor: 0x4a3a78,
         /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
         zenithLowColor: 0x4a3a78,
+        /**
+         * LEFT ALONE deliberately when matching res/gameplay_ref.jpg.
+         *
+         * The reference's horizon band samples rgb(215,244,242) — near-white —
+         * and setting this to that DID land closer to it. It also made the top
+         * of the frame WORSE (89,144,176 against the reference's 74,148,184,
+         * versus 74,138,175 keeping this value), because the upper sky is a
+         * blend of both ends. And since this is also the fog colour, it paled
+         * the entire far field, undoing the vivid/hazy balance for a part of the
+         * frame that was explicitly not the concern.
+         *
+         * Worth knowing if you do want to chase it: the daylight horizon can
+         * never actually reach this colour. `sunHeight` peaks at
+         * sin(timeOfDay.maxElevation) = 0.799, so the horizon is permanently
+         * ~20% `horizonLowColor`. Best case at this value is rgb(201,228,231).
+         */
         horizonColor: 0x7fc2ea,
         /**
          * The horizon colour at a low sun; `horizonColor` is where it lands at a
@@ -989,20 +1115,14 @@ export const gameConfig = {
          */
         horizonLowColor: 0xef8f52,
         /**
-         * DEAD AT THE DEFAULT SUN ANGLE — the glow is only drawn where the sky
-         * dome faces the sun, and this camera never looks anywhere near it.
+         * LIVE as of `timeOfDay.azimuthCenter` moving past 90 degrees.
          *
-         * `sunDirection.z` is POSITIVE, and the camera looks down -Z, so the sun
-         * sits 127 degrees off the view centre at the default angle (143 at a
-         * sunset one) against a frustum of about +/-19 degrees horizontal and
-         * +/-32 vertical. It has never been on screen, which means this colour
-         * and the two glow terms in SkyDome's shader have never rendered a
-         * pixel.
-         *
-         * To actually use it, `sunDirection.z` must go NEGATIVE to put the sun
-         * ahead of the car. That is a real look change, not just a knob: the
-         * whole scene becomes backlit and shadows stretch toward the camera.
-         * Worth knowing before reskinning against a value that does nothing.
+         * For most of this project it was dead: the sun sat behind the camera,
+         * 127 degrees off the view centre against a ~19 degree half-frustum, so
+         * neither this colour nor the two glow terms in SkyDome's shader ever
+         * rendered a pixel. The sun is now in FRONT and in frame in the late
+         * afternoon, which is what makes it visible — and which also means the
+         * scene is backlit and shadows point toward the viewer.
          */
         sunGlowColor: 0xfff2c8,
         /**
@@ -1041,7 +1161,15 @@ export const gameConfig = {
          * ever shows a sliver of dome it is guaranteed to be invisible.
          */
         /** Elevation (as sin) where the ramp reaches full zenith colour. */
-        skyTopHeight: 0.55,
+        /**
+         * Lowered from 0.55 (33°) so the ramp completes nearer the top of what
+         * the camera can see (~25°), letting the upper sky actually reach
+         * `zenithColor`. With a near-white horizon and the ramp finishing above
+         * the frame, the top of the screen could not get blue enough to match
+         * the reference — there was no zenith value that solved it, the
+         * extrapolation went negative in red.
+         */
+        skyTopHeight: 0.45,
         /**
          * How long the horizon colour is held before the ramp lifts. Above 1
          * flattens the low sky; 1.0 is the plain smoothstep. This is the knob

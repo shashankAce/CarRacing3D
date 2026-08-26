@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadLevelAt } from './roadPath';
+import { createRoadTexture } from '../procedural/roadTexture';
+import { createSkyEnvTexture } from '../procedural/skyEnv';
 import type { WorldScroll } from './WorldScroll';
 
 interface BandSlot {
@@ -77,10 +79,54 @@ export class RoadMesh {
         }
         const colorAttribute = new THREE.BufferAttribute(colors, 3);
 
+        // UVs, shared by every band like the normals and colours.
+        //
+        // They are LOCAL to a band, not world-space, which is what lets one
+        // attribute serve the whole recycled pool — and it only works because
+        // `texture.tileMeters` divides `bandLength` exactly, so the wrap lands
+        // on a band boundary instead of drawing a line across the road there.
+        // U comes from the true lateral offset rather than the strip index, so
+        // texel density is the same on the narrow edge lines as on the asphalt.
+        const tile = rs.texture.tileMeters;
+        const uvs = new Float32Array(vertexCount * 2);
+        {
+            const hw = cfg.road.halfWidth;
+            const lw = cfg.road.lineWidth;
+            const stripEdges: Array<[number, number]> = [
+                [-hw, -hw + lw],
+                [-hw + lw, hw - lw],
+                [hw - lw, hw],
+            ];
+            let q = 0;
+            for (let s = 0; s < STRIP_COUNT; s++) {
+                const [left, right] = stripEdges[s];
+                for (let j = 0; j < rows; j++) {
+                    const v = ((j / rs.segmentsPerBand) * rs.bandLength) / tile;
+                    uvs[q++] = (left + hw) / tile;  uvs[q++] = v;
+                    uvs[q++] = (right + hw) / tile; uvs[q++] = v;
+                }
+            }
+        }
+        const uvAttribute = new THREE.BufferAttribute(uvs, 2);
+
+        const road = createRoadTexture(rs.texture.size, rs.texture.grain, rs.texture.streak);
         const material = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
+            // Scaled ABOVE white to undo the texture's average darkening. The
+            // texture can only darken (so that nothing clips in 8 bits), and
+            // this is its measured reciprocal, so the road keeps its intended
+            // level however `grain` is retuned. Values over 1 are fine here —
+            // they are a linear multiplier, not a clamped colour.
+            color: new THREE.Color().setScalar(road.levelScale),
             vertexColors: true,
-            roughness: 0.88,
+            map: road.texture,
+            // Metalness needs something to reflect or it renders black — see
+            // procedural/skyEnv.ts. Applied per-material rather than as
+            // scene.environment, which would add image-based light to every
+            // surface in the game.
+            envMap: createSkyEnvTexture(),
+            envMapIntensity: rs.envIntensity,
+            metalness: rs.metalness,
+            roughness: rs.roughness,
         });
 
         // Generous fixed bound — local geometry is a flat ribbon of known extent.
@@ -103,6 +149,7 @@ export class RoadMesh {
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('normal', normalAttribute);
             geometry.setAttribute('color', colorAttribute);
+            geometry.setAttribute('uv', uvAttribute);
             geometry.setIndex(indexAttribute);
             geometry.boundingSphere = bound;
 
