@@ -3,6 +3,8 @@ import { Node, Group3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
+import type { ShadowDecals } from '../world/ShadowDecals';
+import type { ProjectedShadows } from '../world/ProjectedShadows';
 
 /**
  * Sample offsets along the car's length, as fractions of its half-length, used
@@ -65,6 +67,86 @@ export class PlayerCar {
     get isAgainstEdge(): boolean { return this._againstEdge; }
 
     /** Half-extents used for ground sampling and (Phase 4) collision. */
+    /**
+     * The car's own decal. Uses the DRIVABLE surface under it rather than the
+     * group's y, which carries suspension travel and pitch — a shadow that
+     * bobbed with the springs would read as the ground moving.
+     */
+    /**
+     * Silhouette from the body and cabin MERGED, so the shadow has the cabin
+     * step in it rather than being one flat box. Built at the same local offsets
+     * the visible meshes use, since the silhouette is projected from the same
+     * geometry the camera sees.
+     */
+    registerShadow(decals: ShadowDecals): void {
+        const c = cfg.car;
+        const body = new THREE.BoxGeometry(c.width, c.height, c.length);
+        body.translate(0, c.rideHeight + c.height / 2, 0);
+        const cabin = new THREE.BoxGeometry(
+            c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor);
+        cabin.translate(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
+        // Two parts, not merged — the baker renders both into one silhouette.
+        this._shadowHandle = decals.register([body, cabin]);
+    }
+
+    addShadow(decals: ShadowDecals, travelled: number): void {
+        // The DRIVABLE surface under the car, not the group's y — that carries
+        // suspension travel, and a shadow bobbing with the springs reads as the
+        // ground moving rather than the car.
+        decals.add(
+            this._shadowHandle,
+            this._x,
+            surfaceHeightAt(this._x, travelled),
+            0,
+            1,
+        );
+    }
+
+    private _shadowHandle = -1;
+    private _projectedHandle = -1;
+    private _materials: THREE.Material[] = [];
+
+    /** Every lit material on the car, so it can RECEIVE other casters' shadows. */
+    get receiverMaterials(): THREE.Material[] { return this._materials; }
+
+    /**
+     * Registers the car as a projected-shadow caster. Same two parts as the
+     * decal path, translated by their real local offsets — the caster origin in
+     * the shader is the group's own origin, so the geometry has to be expressed
+     * relative to it.
+     */
+    registerProjected(shadows: ProjectedShadows): void {
+        const c = cfg.car;
+        const body = new THREE.BoxGeometry(c.width, c.height, c.length);
+        body.translate(0, c.rideHeight + c.height / 2, 0);
+        const cabin = new THREE.BoxGeometry(
+            c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor);
+        cabin.translate(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
+        this._projectedHandle = shadows.register([body, cabin]);
+    }
+
+    /** The player's caster handle, so its own material can opt out of it. */
+    get projectedHandle(): number { return this._projectedHandle; }
+
+    /**
+     * Submits the car for this frame.
+     *
+     * Unlike the decal path this passes the group's REAL y, suspension travel
+     * included. A decal had to ignore it because a quad bobbing on the springs
+     * read as the ground moving; a projected shadow lands wherever the light
+     * actually puts it, so following the body is the correct answer rather than
+     * an artefact. Priority is negative to pin the player a slot.
+     */
+    addProjected(shadows: ProjectedShadows): void {
+        const obj = this._group.object3D;
+        shadows.add(
+            this._projectedHandle,
+            obj.position.x, obj.position.y, obj.position.z,
+            obj.rotation.y,
+            -1,
+        );
+    }
+
     get halfWidth(): number { return cfg.car.width / 2; }
     get halfLength(): number { return cfg.car.length / 2; }
 
@@ -74,15 +156,22 @@ export class PlayerCar {
         scene.addChild(node);
 
         const c = cfg.car;
+        const bodyMaterial = new THREE.MeshStandardMaterial({
+            color: cfg.colors.car.body, roughness: 0.5, metalness: 0.15,
+        });
+        const cabinMaterial = new THREE.MeshStandardMaterial({
+            color: cfg.colors.car.cabin, roughness: 0.35, metalness: 0.2,
+        });
+        this._materials.push(bodyMaterial, cabinMaterial);
         const body = new THREE.Mesh(
             new THREE.BoxGeometry(c.width, c.height, c.length),
-            new THREE.MeshStandardMaterial({ color: cfg.colors.car.body, roughness: 0.5, metalness: 0.15 }),
+            bodyMaterial,
         );
         body.position.y = c.rideHeight + c.height / 2;
 
         const cabin = new THREE.Mesh(
             new THREE.BoxGeometry(c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor),
-            new THREE.MeshStandardMaterial({ color: cfg.colors.car.cabin, roughness: 0.35, metalness: 0.2 }),
+            cabinMaterial,
         );
         // Biased toward the rear (+Z) so the silhouette reads as facing -Z.
         cabin.position.set(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
@@ -119,6 +208,7 @@ export class PlayerCar {
         const geometry = new THREE.CylinderGeometry(w.radius, w.radius, w.width, 12);
         geometry.rotateZ(Math.PI / 2);
         const material = new THREE.MeshStandardMaterial({ color: w.color, roughness: 0.85 });
+        this._materials.push(material);
 
         const x = c.width / 2 - w.width * (0.5 - w.outboard);
         const z = this.halfLength * w.axleOffset;

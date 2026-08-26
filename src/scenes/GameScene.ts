@@ -11,6 +11,9 @@ import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
 import { ScatterStreamer } from '../world/ScatterStreamer';
 import { RoadMesh } from '../world/RoadMesh';
+import { ShadowDecals } from '../world/ShadowDecals';
+import { ProjectedShadows } from '../world/ProjectedShadows';
+import { TreeShadowMask } from '../world/TreeShadowMask';
 import { TouchControls } from '../ui/TouchControls';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
@@ -47,6 +50,11 @@ export class GameScene extends Scene {
     private _markers: RoadMarkers;
     private _terrain: TerrainStreamer;
     private _road: RoadMesh;
+    private _shadows: ShadowDecals;
+    private _projected: ProjectedShadows;
+    private _treeMask: TreeShadowMask | null = null;
+    /** Kept from `onRendererReady` so the tree mask can be rendered each frame. */
+    private _renderer: THREE.WebGLRenderer | null = null;
     private _scatter: ScatterStreamer;
     private _traffic: TrafficSystem;
     private _hud: Hud;
@@ -85,6 +93,18 @@ export class GameScene extends Scene {
             // exists. Until then the far tier is invisible rather than
             // untextured.
             this._scatter.bakeImpostors(renderer as THREE.WebGLRenderer);
+            // Shadow silhouettes are baked from the light's point of view, so
+            // they need the renderer too, and must exist before the first frame.
+            this._shadows.bake(renderer as THREE.WebGLRenderer);
+            // The silhouette atlas: one render per caster type, once, then the
+            // receiver shaders sample it forever. Must exist before the first
+            // frame or receivers read a null sampler.
+            this._projected.bake(renderer as THREE.WebGLRenderer);
+            this._treeMask?.bake(renderer as THREE.WebGLRenderer);
+            // The red channel's metre scale is only known once the atlas has
+            // measured the tallest caster.
+            if (this._treeMask) this._projected.setTreeMaskHeightScale(this._treeMask.heightScale);
+            this._renderer = renderer as THREE.WebGLRenderer;
         };
 
         this._sky = new SkyDome(sys.scene);
@@ -96,6 +116,14 @@ export class GameScene extends Scene {
         this._controls = new TouchControls(this);
         this._input = new InputController(this._controls);
         this._input.attach();
+
+        // Created before every receiver and caster: `attach` patches a material
+        // and `register` records geometry, so both need this to already exist.
+        this._projected = new ProjectedShadows();
+        if (cfg.lighting.treeShadows.enabled) {
+            this._treeMask = new TreeShadowMask();
+            this._projected.setTreeMask(this._treeMask.texture, this._treeMask.rect);
+        }
 
         this._car = new PlayerCar(this);
         this._camera = new FollowCamera(this);
@@ -112,13 +140,83 @@ export class GameScene extends Scene {
         this._scatter = new ScatterStreamer(this, this._state.scroll);
         this._terrain.buildAllNow();
         this._road.update();
+        // Built before the first scatter sync, since the scatter loop feeds it.
+        this._shadows = new ShadowDecals(this);
+        // Registered before the first scatter sync, which is what feeds it.
+        this._scatter.setTreeShadowMask(this._treeMask);
+        this._scatter.setShadowDecals(
+            cfg.lighting.bakedShadows.enabled && cfg.lighting.bakedShadows.includeTrees
+                ? this._shadows : null);
         this._syncScatter();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
+        if (cfg.lighting.bakedShadows.enabled) {
+            // Registration only records geometry; the silhouettes are
+            // render-target renders, baked in `onRendererReady` above.
+            this._traffic.registerShadows(this._shadows);
+            this._car.registerShadow(this._shadows);
+        }
+
+        if (cfg.lighting.projectedShadows.enabled) {
+            // Casters first: `register` assigns the handles the receiver
+            // patches below refer to, and the atlas cell order follows them.
+            this._car.registerProjected(this._projected);
+            this._traffic.registerProjected(this._projected);
+
+            // Receivers. Every lit material that should catch a shadow gets the
+            // same patch — that is the whole point of doing this in the shader
+            // rather than with quads on the ground: the ground is not special.
+            // GROUND receivers also sample the tree mask. The road markers are
+            // instanced, which is the case the patch has to handle explicitly —
+            // they were the one surface visibly missing its shadow.
+            this._projected.attach(this._terrain.material, { groundMask: true });
+            this._projected.attach(this._road.material, { groundMask: true });
+            for (const material of this._markers.materials) {
+                this._projected.attach(material, { groundMask: true });
+            }
+            // Vehicles DO take the mask, but with `maskLift` — the lookup is
+            // unprojected along the light first, so a raised or vertical surface
+            // reads the ground point its light ray actually came over rather
+            // than the one beneath it.
+            for (const material of this._traffic.receiverMaterials) {
+                this._projected.attach(material, { groundMask: true, maskLift: true });
+            }
+            // The car receives everything EXCEPT itself. With no depth test its
+            // own silhouette would darken its whole down-light half on top of
+            // what N.L already does, which reads as a smear rather than as
+            // self-shadowing.
+            for (const material of this._car.receiverMaterials) {
+                this._projected.attach(material, {
+                    skip: this._car.projectedHandle,
+                    groundMask: true,
+                    maskLift: true,
+                });
+            }
+        }
         this._hud = new Hud(this);
         this._gameOver = new GameOverPanel(this);
-        if (cfg.debug.showPerf) this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
+        if (cfg.debug.showPerf) {
+            this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
+            // Debug bisection hook for the tree mask; see `debugStats`.
+            (globalThis as Record<string, unknown>).__maskStats = () =>
+                this._treeMask && this._renderer
+                    ? this._treeMask.debugStats(this._renderer) : null;
+            this._perf.shadowCounts = () => ({
+                projected: this._projected.liveCount,
+                treeMask: this._treeMask?.liveCount ?? 0,
+            });
+        }
+    }
+
+    /**
+     * Half-extent of the orthographic shadow camera, from the reach pair. Both
+     * `_buildLights` and `_updateSun` need it and must agree, so it is derived
+     * in one place.
+     */
+    private _shadowRadius(): number {
+        const sh = cfg.lighting.shadows;
+        return (sh.reachAhead + sh.reachBehind) * 0.5;
     }
 
     private _buildLights(): void {
@@ -145,10 +243,20 @@ export class GameScene extends Scene {
             // A directional light's shadow camera is orthographic; these bounds
             // are what the map's texels are spread across.
             const cam = light.shadow.camera;
-            cam.left = -sh.frustumRadius;
-            cam.right = sh.frustumRadius;
-            cam.top = sh.frustumRadius;
-            cam.bottom = -sh.frustumRadius;
+            const radius = this._shadowRadius();
+            cam.left = -radius;
+            cam.right = radius;
+            cam.top = radius;
+            cam.bottom = -radius;
+            // The light has to sit OUTSIDE the box it is shadowing, or geometry
+            // between it and `near` is clipped out of the depth pass and simply
+            // stops casting. Cheap to check, silent and baffling if wrong.
+            if (cfg.lighting.sunDistance <= radius) {
+                console.warn(
+                    `[shadows] sunDistance ${cfg.lighting.sunDistance} is inside the `
+                    + `${radius.toFixed(0)}m shadow radius; casters near the light will drop out.`,
+                );
+            }
             cam.near = sh.near;
             cam.far = sh.far;
             cam.updateProjectionMatrix();
@@ -172,7 +280,10 @@ export class GameScene extends Scene {
         const dist = cfg.lighting.sunDistance;
         const carX = this._car ? this._car.position.x : 0;
         const carY = this._car ? this._car.position.y : 0;
-        const focusZ = -cfg.lighting.shadows.frustumRadius * 0.4;
+        // Box centre, derived so it spans reachBehind..reachAhead about the car
+        // rather than sitting symmetrically and wasting half of itself behind.
+        const sh = cfg.lighting.shadows;
+        const focusZ = (sh.reachBehind - sh.reachAhead) * 0.5;
 
         this._sun.target.position.set(carX, carY, focusZ);
         this._sun.position.set(
@@ -209,7 +320,41 @@ export class GameScene extends Scene {
             // so nothing is ever a frame behind what the player is looking at.
             this._terrain.update();
             this._road.update();
+            // Decals are rebuilt each frame around the scatter sync, which is
+            // what pushes the tree ones -- so begin() has to come first and
+            // commit() after everything has contributed.
+            this._shadows.begin();
+            // Opened BEFORE the scatter sync, which is what pushes the trees.
+            this._treeMask?.begin(this._car.position.x);
+            // The car's own y is the road surface under it (the wheels rest on
+            // the ground), which is the plane every vehicle's lifted lookup is
+            // measured from.
+            this._projected.setTreeMaskPlane(this._car.position.y);
             this._syncScatter();
+            if (cfg.lighting.bakedShadows.enabled) {
+                this._traffic.addShadows(this._shadows, travelled);
+                this._car.addShadow(this._shadows, travelled);
+            }
+            this._shadows.commit();
+
+            // Projected shadows are pure uniform writes — no geometry, no
+            // render target — so this is just "collect the casters, keep the
+            // nearest few". Ordered after the car and traffic have moved.
+            if (cfg.lighting.projectedShadows.enabled) {
+                this._projected.begin();
+                this._car.addProjected(this._projected);
+                this._traffic.addProjected(this._projected);
+                this._projected.commit();
+            }
+            // The mask window follows the car and is filled by `_syncScatter`
+            // above, so `commit` closes it here. The RENDER has to wait for the
+            // renderer, which the engine only hands over in `onRendererReady` —
+            // see `_renderTreeMask`.
+            this._treeMask?.commit();
+            // Rendered here rather than in a draw callback because the engine
+            // renders the scene straight after `update`, and the ground
+            // materials sample this mask in that same frame.
+            if (this._renderer) this._treeMask?.render(this._renderer);
             this._markers.update();
         } else if (this._input.consumeTap()) {
             this._restart();

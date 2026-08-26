@@ -20,6 +20,13 @@ import type { WorldScroll } from './WorldScroll';
  *    them — they'd get silently culled.
  */
 export class RoadMarkers {
+    /**
+     * Both marker materials, so the dashes and the verge posts RECEIVE shadows.
+     * They are instanced, which is exactly the case the receiver patch has to
+     * get right — see the instancing note in `ProjectedShadows.attach`.
+     */
+    readonly materials: THREE.Material[] = [];
+
 
     private _dashes: InstancedMesh3D;
     private _posts: InstancedMesh3D;
@@ -64,7 +71,9 @@ export class RoadMarkers {
         const node = new Node();
         const mesh = node.addComponent(InstancedMesh3D);
         mesh.geometry = geometry;
-        mesh.material = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+        const material = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+        this.materials.push(material);
+        mesh.material = material;
         mesh.count = count;
         scene.addChild(node);
         mesh.object3D.frustumCulled = false;

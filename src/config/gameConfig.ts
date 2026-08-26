@@ -193,6 +193,77 @@ export const gameConfig = {
         baseFrequency: 0.045,
 
         /**
+         * TERRAIN THAT SHADOWS ITSELF — hills shading the ground behind them,
+         * mountains laying shadow down their own flanks.
+         *
+         * This is not the same feature as `lighting.shadows` or
+         * `lighting.bakedShadows`, and neither of those has ever done it: the
+         * terrain mesh carries `receiveShadow` only, so it has never been a
+         * shadow CASTER under any setting. Those two handle the car, traffic
+         * and trees; this handles the ground.
+         *
+         * It is baked into the vertex colour at chunk build time, so it costs
+         * nothing per frame — no draw call, no render target, no texture, no
+         * bundle bytes. The entire price is chunk build time, which is the one
+         * budget in this game with very little slack (`maxBuildsPerFrame` is 1).
+         * Watch `build/peak/all` on the perf HUD after changing anything here;
+         * the numbers that matter are documented in `terrainShadow.ts`.
+         *
+         * BAKED MEANS BAKED: the shade is locked to the light direction at the
+         * moment each chunk was built. That is sound only because the hour is
+         * fixed at boot and never advances. If time is ever animated, every
+         * resident chunk has to be rebuilt on a change.
+         */
+        selfShadow: {
+            enabled: true,
+            /**
+             * How dark a fully occluded vertex gets: albedo is multiplied by
+             * `1 - strength`. Deliberately well short of black — the ground in
+             * shadow still sees the sky, and this term cannot represent that.
+             */
+            strength: 0.45,
+            /**
+             * How far to look for an occluder, metres. Derived, not picked: a
+             * mountain is `mountains.amplitude` 30m above the hills, and at the
+             * clamp elevation below it throws 30/tan(6 deg)... far more than
+             * this. 70m is the useful compromise — it catches every hill shadow
+             * and the near half of a mountain's, and the far half is deep in
+             * fog anyway. Cost is flat in this value; only `steps` costs.
+             */
+            reach: 70,
+            /**
+             * March samples per lattice point. THE COST DIAL — total height-field
+             * evaluations per chunk are `steps * (chunkSize/gridStep + 1)^2`, and
+             * the existing build already spends 361 of them. Distances ramp
+             * quadratically, so raising this refines the near end most.
+             */
+            steps: 5,
+            /**
+             * Lattice spacing for the march, metres. MUST DIVIDE `chunkSize`
+             * exactly, or chunk edges stop sharing sample points with their
+             * neighbours and seams appear; `makeShadeGrid` warns if it doesn't.
+             * Cost scales with the inverse SQUARE of this, so 5 -> 2.5 is 4x.
+             */
+            gridStep: 5,
+            /**
+             * Shadow edge softness, as a dimensionless slope (occluder height
+             * over distance). Not an attempt at a real penumbra — it is what
+             * keeps the coarse lattice from producing a stair-stepped edge.
+             * 0.06 is about 3.4 degrees.
+             */
+            softness: 0.06,
+            /**
+             * Floor on the light elevation used for the march, degrees. At a
+             * true sunset elevation shadows run for hundreds of metres, so a
+             * 70m reach sees only their near ends and the terrain reads as
+             * blotches rather than shadows. Clamping keeps them long but
+             * bounded, and keeps the look continuous across the sun/moon
+             * handover rather than popping.
+             */
+            minElevationDegrees: 6,
+        },
+
+        /**
          * Mountains — a selective, much larger height term on top of the hills.
          *
          * Structure ported from `Procedural_3D_world/src/terrain/ambientHeight.js`:
@@ -430,7 +501,7 @@ export const gameConfig = {
          */
         types: [
             { name: 'car', width: 1.9, height: 0.95, length: 4.2, speedMin: 17, speedMax: 21, weight: 5, color: 0x3f7fbf },
-            { name: 'coupe', width: 1.8, height: 0.85, length: 3.9, speedMin: 19, speedMax: 23, weight: 3, color: 0xd8b23a },
+            { name: 'coupe', width: 1.8, height: 0.85, length: 3.9, speedMin: 19, speedMax: 26, weight: 3, color: 0xd8b23a },
             { name: 'van', width: 2.1, height: 1.7, length: 5.4, speedMin: 14, speedMax: 18, weight: 3, color: 0xe3e0d6 },
             { name: 'bus', width: 2.4, height: 2.5, length: 9.0, speedMin: 12, speedMax: 15, weight: 2, color: 0xc25b3a },
         ],
@@ -872,7 +943,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 4,
+            hour: 7,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
@@ -939,12 +1010,259 @@ export const gameConfig = {
          * the least gameplay value at this camera angle, so this is a deliberate
          * on/off knob rather than something assumed.
          *
-         * `frustumRadius` is the half-extent of the orthographic shadow camera.
-         * It has to cover the ground the player can actually see shadows on —
-         * too large and the map's texels stretch until shadows go blocky, too
-         * small and shadows pop in a few metres ahead of the car. The camera
-         * FOLLOWS the car, so this bounds the near field, not the draw distance.
+         * The shadow camera is orthographic and FOLLOWS the car, so `reachAhead`
+         * and `reachBehind` bound the near field, not the draw distance. Its
+         * half-extent and centre are DERIVED from them rather than configured,
+         * because the pair is what anyone actually wants to reason about:
+         *
+         *     radius = (reachAhead + reachBehind) / 2
+         *     centre = (reachBehind - reachAhead) / 2   (render Z, forward is -Z)
          */
+        /**
+         * Baked shadow decals: one instanced quad per caster, instead of a
+         * shadow map. See `world/ShadowDecals.ts` for the measurements.
+         *
+         * Short version — the real-time path costs 15 draw calls, 4,268 triangles
+         * and 3 extra shader programs a frame, and worse, all 72 receivers take a
+         * PCF sample per fragment. The receivers are the terrain and the road, so
+         * that is a per-pixel tax across most of the screen on a GPU that is
+         * fill-bound. Decals are ~2 draws and ~500 triangles with no per-pixel
+         * cost outside the blobs.
+         *
+         * Nothing real is lost here because terrain never cast shadows anyway;
+         * what goes is objects shadowing each other, which this camera cannot
+         * see. The one honest regression is tree shadows at a very low sun, where
+         * a stretched blob has none of the structure a projected canopy does.
+         *
+         * Use ONE of these and `shadows.enabled`, not both.
+         */
+        /**
+         * TREE SHADOWS — hundreds of static casters, in one top-down texture.
+         *
+         * A separate mechanism from `projectedShadows` for one hard reason:
+         * that one holds each caster in a uniform slot, and `trees.maxInstances`
+         * is 400. So tree silhouettes are drawn — already projected onto the
+         * ground plane — into a single orthographic top-down render target, and
+         * the GROUND materials sample it by world XZ. One extra draw call (the
+         * quads are instanced) and one texture fetch per ground fragment, for an
+         * unbounded number of casters.
+         *
+         * This is what finally makes tree shadows drape. The decal quads failed
+         * on a measured fact: a 14m tree at a 28 degree sun projects 30m of
+         * ground while terrain amplitude is 5.5m, so a planar quad is buried for
+         * most of its length. Here nothing is placed in the world at all — the
+         * mask is a function of ground position, evaluated by the ground shader
+         * at whatever height the fragment actually has, so burial cannot happen.
+         *
+         * GROUND ONLY, and that is structural: a lookup by world XZ gives every
+         * point of a vertical surface at the same XZ the same value, so sampling
+         * this on a tree trunk or a car would give a vertical streak. Vehicles
+         * are therefore not mask receivers. A tree's shadow falling across the
+         * car is what this split gives up.
+         */
+        treeShadows: {
+            enabled: true,
+            /**
+             * Mask resolution. With `windowSize` this is THE quality number for
+             * tree shadows, and the reason they read softer than the vehicles':
+             *
+             *     vehicle: 256 texel cell over a ~3m footprint  = ~85 texels/m
+             *     tree:    1024 texel mask over a 160m window   =  6.4 texels/m
+             *
+             * Still a 13x gap, and it is structural — a per-caster cell is a
+             * fixed budget for ONE object, while the mask spreads its texels over
+             * the whole window. Raising this or lowering `windowSize` is the only
+             * lever, and both cost the same thing: mask fill per frame, which
+             * scales with the SQUARE of the density.
+             *
+             * 4MB of GPU memory at 1024 (RGBA). An alpha-only RedFormat target
+             * would be 1MB and is safe on WebGL2, but it complicates readback in
+             * `debugStats`; worth doing if memory ever binds. Download size — the
+             * actual 2MB budget — is untouched either way.
+             */
+            maskSize: 1024,
+            /**
+             * Side of the world window the mask covers, metres. Trades texel
+             * density directly against how far ahead shadows exist at all, and
+             * shrinking it is the CHEAPEST quality win available — unlike
+             * `maskSize` it costs no memory.
+             *
+             * Chosen against the fog, not the draw distance. With `forwardBias`
+             * 0.40 this reaches 144m ahead, where fog has erased about half of
+             * everything; the edge fade then has an easy job hiding the boundary.
+             * Pushing it below ~120m starts cutting shadows while they are still
+             * clearly visible, and no amount of fade hides that.
+             */
+            windowSize: 160,
+            /**
+             * How far the window is pushed AHEAD of the car, as a fraction of
+             * `windowSize`. The ground behind the camera is off screen, so
+             * centring the window on the car would spend nearly half its texels
+             * on nothing. 0.35 leaves a little margin behind for the shadow of a
+             * tree the car has just passed.
+             */
+            forwardBias: 0.40,
+            /**
+             * Atlas cell resolution per tree variant. 256, not 128, so the ATLAS
+             * is not the bottleneck as well: at 256 a cell resolves ~40 texels/m
+             * across the shadow and ~7.5 along it once the sun's stretch is
+             * applied, both comfortably past the mask's 6.4. One bottleneck, in
+             * the place where raising the dial actually pays.
+             */
+            textureSize: 256,
+            /**
+             * Instance slots for trees in the mask. `trees.maxPerVariant` times
+             * the variant count bounds the near tier, but most of those are
+             * outside the window, which `add` rejects before spending a slot.
+             */
+            maxCasters: 320,
+            /**
+             * How much direct light a fully occluded ground fragment loses.
+             * Lower than `projectedShadows.opacity` on purpose: a canopy is not
+             * opaque, and dappled light through leaves is the look this is
+             * standing in for.
+             */
+            opacity: 0.72,
+            /**
+             * Fraction of the window's edge over which the mask fades out. The
+             * window has a hard boundary and shadows simply stop existing past
+             * it; without a fade that boundary is a visible straight line across
+             * the terrain, travelling with the car.
+             */
+            edgeFade: 0.08,
+        },
+
+        /**
+         * PROJECTED SHADOWS — the shadow is computed inside each RECEIVER's
+         * fragment shader, and is the technique that replaced the decal quads.
+         *
+         * The decals failed for a reason no amount of placement work would have
+         * fixed: they composited a dark quad on top of already-lit ground, so
+         * they read as plates. This instead scales `directDiffuse`/
+         * `directSpecular` after `lights_fragment_begin`, i.e. it removes the
+         * SUN and leaves ambient and the env map alone — which is what makes a
+         * shadow shift cool instead of merely dark. There is also no quad, so
+         * the whole "draping on irregular terrain" problem disappears: every
+         * fragment resolves its own shadow at its own position.
+         *
+         * Zero extra draw calls and zero per-frame render targets. The cost is
+         * per fragment on every receiver and scales with `maxCasters`.
+         *
+         * Handles the CAR and TRAFFIC. It cannot handle trees — `trees
+         * .maxInstances` is 400 and these are uniform slots — so tree shadows
+         * are still missing and need a different mechanism. See `terrain
+         * .selfShadow` for the ground's own shading, which is unrelated.
+         *
+         * Like everything else here, it relies on the hour being fixed at boot:
+         * the silhouette atlas is baked once for one light direction.
+         */
+        projectedShadows: {
+            enabled: true,
+            /**
+             * Uniform slots for simultaneous casters, and a COMPILE-TIME
+             * constant in the receiver shader — changing it recompiles every
+             * patched material.
+             *
+             * 6 is derived, not guessed: `traffic.maxAlive` is 16, but
+             * `traffic.spawnAhead` is 210m and a shadow is unreadable past a
+             * few tens of metres, so the nearest five plus the player is the
+             * whole visible population. Casters beyond the slot count are
+             * dropped by distance, and the player's is pinned.
+             *
+             * Each slot costs three vec4 uniforms and, per fragment, a handful
+             * of dot products — plus a texture fetch ONLY for fragments actually
+             * inside that caster's footprint, which is why the practical cost is
+             * far below the worst case.
+             */
+            maxCasters: 6,
+            /**
+             * Atlas cell resolution per caster. This is the reason this approach
+             * beats the shadow map on quality: a cell is a fixed budget for ONE
+             * object, whereas a shadow map spreads its texels over the whole
+             * frustum. 256 across a 4m car is ~64 texels/m; a 512 map over the
+             * shadow reach managed about 7.
+             */
+            textureSize: 256,
+            /**
+             * How much of the direct light a fully occluded fragment loses.
+             * Can sit near 1 because this is genuine light attenuation and
+             * ambient still lights the surface — unlike the decals, where the
+             * same number was an alpha blend and had to stay low to avoid
+             * looking painted on.
+             */
+            opacity: 0.85,
+            /**
+             * Shadows fade out between these distances DOWN-LIGHT of the
+             * caster, in metres.
+             *
+             * This is not a stylistic softening — it is the fix for the one
+             * artefact of having no depth test. The lookup is a shadow-map
+             * lookup minus the depth compare, so without a limit a car's shadow
+             * would darken a hillside 200m away. Set `fadeFar` comfortably past
+             * the longest legitimate shadow: at the current sun that is roughly
+             * the caster's height times 2.2, so a 2.5m bus needs ~6m and the
+             * headroom below covers a lower sun without re-tuning.
+             */
+            fadeNear: 10,
+            fadeFar: 25,
+        },
+
+        bakedShadows: {
+            enabled: false,
+            /**
+             * Tree decals are OFF, and this is a real limitation rather than a
+             * tuning choice.
+             *
+             * A decal is one planar quad, and the projected length is
+             * height/sin(elevation) — a 14m tree at a 28 degree sun covers 30m of
+             * ground. Terrain here has 5.5m of amplitude over a ~140m wavelength,
+             * so across 30m the ground moves metres and the quad spends most of
+             * its length underground. Rendered as solid quads to check, the tree
+             * shadows show as fragments poking out from behind rises: not a seam,
+             * a broken shadow.
+             *
+             * Vehicles are unaffected because they are short (a car covers ~3m)
+             * and sit on the ROAD, which is a flat ribbon — those are effectively
+             * exact.
+             *
+             * Fixing trees needs the shadows to DRAPE, which a quad cannot do.
+             * The way is a top-down shadow mask: draw every silhouette into one
+             * orthographic render target from above, and have the terrain and
+             * road shaders sample it by world XZ. That is correct on any terrain
+             * by construction, and costs one 512-square target plus a fetch per
+             * ground fragment. See `world/ShadowDecals.ts`.
+             */
+            includeTrees: false,
+            /** How dark, 0-1. Shadows here are ambient occlusion as much as shadow. */
+            opacity: 0.42,
+            /**
+             * Silhouette texture edge, pixels, per caster shape.
+             *
+             * 64 was carried over from when these were soft blobs and is far too
+             * coarse for a shape: a tree's silhouette stretches to ~30m of ground
+             * at a 28-degree sun, so 64 pixels is half a metre each and the trunk
+             * and canopy dissolve into a smear. 256 gives ~64 px/m across and
+             * ~18 along, which holds the shape.
+             *
+             * Cost is VRAM only, once: 256-square RGBA per distinct shape, so
+             * about 2.4MB across the nine currently registered. Nothing per frame.
+             */
+            textureSize: 256,
+            /** Ceiling on live decals. Trees dominate; ~260 is typical. */
+            maxInstances: 400,
+            /**
+             * Cap on shadow length as a multiple of caster height.
+             *
+             * Length is height/tan(elevation), which is unbounded as the sun
+             * drops — at 8 degrees it is 7x, and a 7x-stretched blob reads as a
+             * smear rather than a shadow. This is where realism gives way.
+             */
+            stretchMax: 3.5,
+            /** Metres above the ground, to stay out of a z-fight on slopes. */
+            lift: 0.06,
+            /** Footprint width as a multiple of the caster's radius. */
+            spread: 1.15,
+        },
         shadows: {
             /**
              * Re-enabled to be re-measured. These were switched OFF in the
@@ -954,8 +1272,12 @@ export const gameConfig = {
              * so 512 is a quarter of what was measured as costing ~8.9ms.
              * Check `frame` and `worst` on the phone; if it regresses, this
              * flag is the one to flip, not the map size.
+             *
+             * OFF now: `bakedShadows` replaces this. Kept switchable because a
+             * shadow map is still the better answer for tree shadows at a very
+             * low sun, where a stretched decal has no structure.
              */
-            enabled: true,
+            enabled: false,
             /**
              * 512, not 1024. Measured at ~8.9ms a frame on a low-end phone at
              * 1024 with a 70m frustum — a third of a 42ms regression. Halving
@@ -964,7 +1286,33 @@ export const gameConfig = {
              * roughly where it was.
              */
             mapSize: 512,
-            frustumRadius: 40,
+            /**
+             * How far AHEAD of the car shadows exist, metres. This is the knob
+             * for "shadows appear too late" — beyond it there is no shadow at
+             * all, so trees pop theirs on as they cross it.
+             *
+             * Raising it is FREE in fill cost: the depth pass renders the same
+             * mapSize either way, this only changes how much world each texel
+             * covers. What it costs is sharpness — texel size is
+             * (reachAhead + reachBehind) / mapSize, so doubling the reach doubles
+             * the blockiness. `mapSize` buys that back and is the expensive one:
+             * 1024 is 4x the depth-pass pixels of 512.
+             *
+             * Hard ceiling: `trees.lodCrossover`. Past it trees are billboards
+             * and cast nothing (they cannot, being flat), so pushing this beyond
+             * that distance buys nothing for trees.
+             */
+            reachAhead: 60,
+            /**
+             * How far BEHIND the car shadows exist, metres.
+             *
+             * This was the waste. The centre used to be a hidden `radius * 0.4`
+             * in `_updateSun`, which at radius 40 put 24m of the box behind a
+             * camera that sits only 8.2m back — a third of the shadow map spent
+             * on ground nobody can see. 14 keeps enough for the car's own shadow
+             * and the setback, and hands the rest forward for nothing.
+             */
+            reachBehind: 14,
             near: 1,
             far: 260,
             /** Peter-panning vs acne. normalBias is the safer of the two dials. */

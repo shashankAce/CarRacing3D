@@ -7,6 +7,11 @@ import { heightAt, normalAt } from '../procedural/heightField';
 import { roadCenterX } from './roadPath';
 import { mulberry32, hashChunk } from '../procedural/random';
 import type { WorldScroll } from './WorldScroll';
+import type { ShadowDecals } from './ShadowDecals';
+import type { TreeShadowMask } from './TreeShadowMask';
+
+/** Reused by placement generation — allocation-free, same reason as `normalAt`. */
+const scratchNormal = { x: 0, y: 1, z: 0 };
 
 interface Placement {
     x: number;
@@ -16,6 +21,15 @@ interface Placement {
     rotationY: number;
     scale: number;
     variant: number;
+    /**
+     * Ground normal at the trunk, in WORLD space, sampled once at placement.
+     * Stored rather than sampled per frame because `normalAt` is four `heightAt`
+     * calls and placements are cached per chunk — so this costs nothing after the
+     * chunk is built, and shadow decals need it every frame to lie in the slope.
+     */
+    nx: number;
+    ny: number;
+    nz: number;
 }
 
 /** A variant's mesh plus the billboard that stands in for it at distance. */
@@ -79,6 +93,31 @@ export class ScatterStreamer {
     private _scaleVec = new THREE.Vector3();
 
     /** Diagnostics for the perf HUD: near geometry + far billboards. */
+    /** Set by GameScene when baked shadows are in use. */
+    private _decals: ShadowDecals | null = null;
+    private _shadowHandles: number[] = [];
+
+    private _treeMask: TreeShadowMask | null = null;
+    private _maskHandles: number[] = [];
+
+    /**
+     * Wires up the top-down tree shadow mask. One silhouette per variant, same
+     * as the decal path — each tree keeps its own trunk and canopy shape.
+     */
+    setTreeShadowMask(mask: TreeShadowMask | null): void {
+        this._treeMask = mask;
+        if (!mask) return;
+        this._maskHandles = this._variants.map(v => mask.register(v.tree.geometry));
+    }
+
+    setShadowDecals(decals: ShadowDecals | null): void {
+        this._decals = decals;
+        if (!decals) return;
+        // One silhouette per tree variant, so each keeps its own trunk and
+        // canopy shape rather than sharing a generic blob.
+        this._shadowHandles = this._variants.map(v => decals.register(v.tree.geometry));
+    }
+
     private _nearCount = 0;
     private _farCount = 0;
 
@@ -212,7 +251,11 @@ export class ScatterStreamer {
                 // normalY falls as the ground steepens; reject cliffs.
                 if (_normal.y < 1 / Math.sqrt(1 + t.maxSlope * t.maxSlope)) continue;
 
-                out.push({ x, z, y: heightAt(x, z) - t.sinkDepth, rotationY, scale, variant });
+                normalAt(x, z, scratchNormal);
+                out.push({
+                    x, z, y: heightAt(x, z) - t.sinkDepth, rotationY, scale, variant,
+                    nx: scratchNormal.x, ny: scratchNormal.y, nz: scratchNormal.z,
+                });
             }
         }
         return out;
@@ -299,6 +342,55 @@ export class ScatterStreamer {
         }
         this._nearCount = near;
         this._farCount = far;
+
+        // Tree decals, from the NEAR buckets only. The far tier is billboards,
+        // which could not cast a shadow map either -- and a shadow under a
+        // 200m-distant tree is well past where fog has erased it.
+        if (this._decals) {
+            for (let v = 0; v < this._buckets.length; v++) {
+                const variant = this._variants[v];
+                const handle = this._shadowHandles[v];
+                for (const p of this._buckets[v]) {
+                    this._decals.add(
+                        handle,
+                        p.x,
+                        // `p.y` is the terrain height MINUS `trees.sinkDepth`, so
+                        // the trunk grows out of the ground rather than onto it.
+                        // Adding it back recovers the actual surface — without
+                        // this the decal sits 0.19m underground and never draws,
+                        // which is exactly how it first shipped.
+                        p.y + cfg.trees.sinkDepth,
+                        travelled - p.z,
+                        p.scale,
+                        // Render space mirrors Z, so the stored WORLD normal's z
+                        // flips with it.
+                        p.nx, p.ny, -p.nz,
+                    );
+                }
+            }
+        }
+
+        // Tree shadows into the mask, from the NEAR buckets only — for the same
+        // reason as the decals: the far tier is billboards, and a shadow 200m out
+        // is behind 92% fog.
+        if (this._treeMask) {
+            for (let v = 0; v < this._buckets.length; v++) {
+                const handle = this._maskHandles[v];
+                for (const p of this._buckets[v]) {
+                    this._treeMask.add(
+                        handle,
+                        p.x,
+                        // `p.y` is the surface MINUS `trees.sinkDepth`; adding it
+                        // back recovers the real ground. Unused by the mask,
+                        // which has no height axis, but kept so the two paths
+                        // cannot drift apart.
+                        p.y + cfg.trees.sinkDepth,
+                        travelled - p.z,
+                        p.scale,
+                    );
+                }
+            }
+        }
 
         for (let v = 0; v < this._meshes.length; v++) {
             const mesh = this._meshes[v];

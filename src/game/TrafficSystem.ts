@@ -3,6 +3,8 @@ import { Node, Group3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadHeadingAt, roadPitchAt } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
+import type { ShadowDecals } from '../world/ShadowDecals';
+import type { ProjectedShadows } from '../world/ProjectedShadows';
 
 /** What a vehicle is doing about the one in front. */
 const enum Manoeuvre {
@@ -66,6 +68,7 @@ export interface TrafficVehicle {
 export class TrafficSystem {
 
     private _pool: TrafficVehicle[] = [];
+    private _shadowHandles: number[] = [];
     private _materials: THREE.MeshStandardMaterial[] = [];
     /** Player travel at which the next spawn is attempted. */
     private _nextSpawnAt = 0;
@@ -269,6 +272,79 @@ export class TrafficSystem {
             if (gap < 0 && -gap < o.minGapBehind) return false;
         }
         return true;
+    }
+
+    /**
+     * Push a decal for every live vehicle. Positions match `_place` exactly —
+     * same x, same render z, and the ground they sit ON rather than their own
+     * centre, so the shadow lands on the asphalt and not inside the box.
+     */
+    /**
+     * One silhouette per vehicle TYPE, baked from that type's own box. Sharing a
+     * single box and scaling it would be wrong: a box's silhouette from an angle
+     * is a hexagon whose shape depends on its aspect ratio, so a bus and a car
+     * do not project to scaled copies of each other.
+     */
+    /** Every vehicle material, so traffic can RECEIVE the player's shadow. */
+    get receiverMaterials(): THREE.Material[] { return this._materials; }
+
+    /**
+     * Registers one caster per vehicle TYPE.
+     *
+     * Per type and not one scaled box: a box's silhouette is a hexagon whose
+     * shape depends on its aspect ratio, so a bus is not a stretched car. Four
+     * types, four cells in the atlas.
+     *
+     * The geometry is the CENTRED box, matching `_place`, which puts the group
+     * origin at `surfaceHeight + height/2`. The decal path registered the same
+     * centred box but submitted the GROUND height, a half-height error that is
+     * part of why those shadows sat wrong.
+     */
+    registerProjected(shadows: ProjectedShadows): void {
+        this._projectedHandles = cfg.traffic.types.map(type =>
+            shadows.register(new THREE.BoxGeometry(type.width, type.height, type.length)));
+    }
+
+    /**
+     * Submits every live vehicle. Priority is the squared distance from the
+     * camera's end of the world, so when there are more vehicles than slots the
+     * nearest ones win — which is the only place a shadow is legible anyway.
+     */
+    addProjected(shadows: ProjectedShadows): void {
+        for (const v of this._pool) {
+            if (!v.active) continue;
+            const obj = v.group.object3D;
+            shadows.add(
+                this._projectedHandles[v.type],
+                obj.position.x, obj.position.y, obj.position.z,
+                obj.rotation.y,
+                obj.position.x * obj.position.x + obj.position.z * obj.position.z,
+            );
+        }
+    }
+
+    private _projectedHandles: number[] = [];
+
+    registerShadows(decals: ShadowDecals): void {
+        this._shadowHandles = cfg.traffic.types.map(type =>
+            decals.register(new THREE.BoxGeometry(type.width, type.height, type.length)));
+    }
+
+    addShadows(decals: ShadowDecals, travelled: number): void {
+        for (const v of this._pool) {
+            if (!v.active) continue;
+            const x = this.worldXOf(v);
+            // World up rather than the road's normal: the road is a near-flat
+            // ribbon, and its pitch is gentle enough that the tilt is not worth
+            // a per-vehicle sample.
+            decals.add(
+                this._shadowHandles[v.type],
+                x,
+                surfaceHeightAt(x, v.worldZ),
+                travelled - v.worldZ,
+                1,
+            );
+        }
     }
 
     private _place(v: TrafficVehicle, travelled: number): void {

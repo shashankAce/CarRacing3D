@@ -41,6 +41,9 @@ export class RoadMesh {
     private _live = new Map<number, BandSlot>();
     private _scroll: WorldScroll;
     private _lastBaseBi = Number.NaN;
+    /** The shared band material — the hook for `ProjectedShadows.attach`. */
+    readonly material: THREE.MeshStandardMaterial;
+
 
     constructor(scene: THREE.Scene, scroll: WorldScroll) {
         this._scroll = scroll;
@@ -128,6 +131,8 @@ export class RoadMesh {
             metalness: rs.metalness,
             roughness: rs.roughness,
         });
+        // One instance shared by every band, for the same reason as the terrain.
+        this.material = material;
 
         // Generous fixed bound — local geometry is a flat ribbon of known extent.
         // Generous fixed bound. It has to cover the band's lateral sway AND its

@@ -4,6 +4,7 @@ import { gameConfig as cfg } from './config/gameConfig';
 import { GameScene } from './scenes/GameScene';
 import { installFogCurve } from './procedural/fogCurve';
 import { resolveTimeOfDay } from './config/timeOfDay';
+import { refreshTerrainShadow } from './procedural/terrainShadow';
 
 /**
  * Entry point. See ARCHITECTURE.md for the design, the verified engine
@@ -21,6 +22,11 @@ installFogCurve();
 // which the sky, the derived fog and the shadow frustum all read. Must run
 // BEFORE the scene is constructed, since GameScene derives fog from the sun.
 resolveTimeOfDay();
+
+// Terrain self-shadowing marches toward whichever body is lighting the scene,
+// so it has to read `lighting.sunDirection` AFTER the line above swapped in the
+// moon's direction (or didn't). Baked per chunk from here on.
+refreshTerrainShadow();
 
 const platform = createPlatform();
 await platform.initialize();  // must be awaited BEFORE constructing GameEngine

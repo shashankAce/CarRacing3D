@@ -75,6 +75,9 @@ export class TerrainStreamer {
     /** Clears the rolling peak so it tracks the recent worst, not the startup burst. */
     resetPeak(): void { this.peakBuildMs = 0; }
 
+    /** The shared chunk material — the hook for `ProjectedShadows.attach`. */
+    readonly material: THREE.MeshStandardMaterial;
+
     constructor(scene: THREE.Scene, scroll: WorldScroll) {
         this._scroll = scroll;
 
@@ -92,6 +95,9 @@ export class TerrainStreamer {
             roughness: 0.94,
             metalness: 0.0,
         });
+        // One instance shared by every chunk, so a single shader patch reaches
+        // all of them and a single uniform write updates all of them.
+        this.material = material;
 
         // Lateral columns are centred on the road, biased so an even count
         // straddles x=0 rather than sitting off to one side.

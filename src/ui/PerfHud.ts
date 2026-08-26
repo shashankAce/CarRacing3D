@@ -44,6 +44,9 @@ export class PerfHud {
     private _sinceRepaint = 0;
     private _lastBuildCount = 0;
 
+    /** Live shadow-caster counts, supplied by GameScene. Optional — null reads as 0. */
+    shadowCounts: (() => { projected: number; treeMask: number }) | null = null;
+
     constructor(scene: Scene, streamer: TerrainStreamer, scatter: ScatterStreamer, sys: any) {
         this._streamer = streamer;
         this._scatter = scatter;
@@ -81,6 +84,13 @@ export class PerfHud {
         const buildsPerSec = (this._streamer.buildCount - this._lastBuildCount) / this._elapsed;
         const info = this._sys.renderer?.info.render;
         const s = this._streamer;
+        const sc = this.shadowCounts ? this.shadowCounts() : { projected: 0, treeMask: 0 };
+        // Also hung off `window`, so the counts can be read without reading
+        // pixels. Debug-gated: PerfHud only exists when `debug.showPerf` is on.
+        (globalThis as Record<string, unknown>).__shadowCounts = {
+            ...sc, draws: info?.calls ?? 0, tris: info?.triangles ?? 0,
+            fps: Number(fps.toFixed(1)), worstMs: Number(this._worstFrameMs.toFixed(2)),
+        };
 
         this._label.text =
             `FPS ${fps.toFixed(0)} frame ${meanMs.toFixed(1)} worst ${this._worstFrameMs.toFixed(1)}ms\n` +
@@ -90,6 +100,11 @@ export class PerfHud {
             // distance can be tuned by eye against what it actually did.
             `lod ${cfg.trees.lodCrossover}m near ${this._scatter.nearCount} far ${this._scatter.farCount}\n` +
             `draws ${info?.calls ?? 0} tris ${((info?.triangles ?? 0) / 1000).toFixed(1)}k\n` +
+            // Caster counts. `proj` is the uniform slots in use (car + traffic)
+            // and `mask` the trees drawn into the top-down mask. `mask 0` with
+            // trees on screen means the window is misplaced, not that the
+            // shaders are wrong — the two failure modes look identical on screen.
+            `shadow proj ${sc.projected} mask ${sc.treeMask}\n` +
             `load ${s.initialBuildMs.toFixed(0)}ms  ${timeOfDayLine()}`;
 
         this._lastBuildCount = s.buildCount;

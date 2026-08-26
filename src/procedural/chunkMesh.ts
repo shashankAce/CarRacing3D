@@ -1,6 +1,7 @@
 import { gameConfig as cfg } from '../config/gameConfig';
 import { heightRowAt, heightInRow, type HeightRow } from './heightField';
 import { terrainColorAt } from './terrainColor';
+import { fillShadeGrid, makeShadeGrid, shadeAt, type ShadeGrid } from './terrainShadow';
 
 /**
  * chunkMesh — builds one terrain chunk's vertex data.
@@ -99,6 +100,13 @@ let _heights: Float64Array | null = null;
 let _heightsSide = 0;
 
 /**
+ * Terrain self-shadow lattice for this chunk, reused across every build. Coarser
+ * than the vertex grid on purpose — see `terrainShadow.ts` for why, and for the
+ * chunk-build cost that forced it.
+ */
+let _shade: ShadeGrid | null = null;
+
+/**
  * Fills one chunk's vertex data. `cx`/`cz` are chunk grid coordinates; the
  * chunk covers world X `[cx*size, (cx+1)*size]` and world Z
  * `[cz*size, (cz+1)*size]`.
@@ -144,6 +152,14 @@ export function fillChunkBuffers(
         }
     }
 
+    // ── Pass 1b: the self-shadow lattice ─────────────────────────────────
+    // Marched toward the light on its own coarse grid, then sampled per vertex
+    // below. Allocated on first build; `makeShadeGrid` reads the chunk size and
+    // spacing from config, both fixed for the session.
+    if (_shade === null) _shade = makeShadeGrid();
+    const shade = _shade;
+    fillShadeGrid(originX, originZ, shade);
+
     // ── Pass 2: write vertices, differencing the grid for normals ─────────
     const invTwoStep = 1 / (2 * step);
     let pi = 0, ni = 0, ui = 0, ci = 0;
@@ -174,6 +190,15 @@ export function fillChunkBuffers(
             const nx = -dx / len, ny = 1 / len, nz = dZ / len;
 
             terrainColorAt(originX + localX, h, worldZ, ny, _color);
+
+            // Self-shadow, multiplied into the albedo. The vertex colour is
+            // LINEAR (see terrainColor.ts), so a plain multiply is the right
+            // operation here and needs no encoding step. It darkens the ambient
+            // term along with the sun's, which is not strictly right — a
+            // shadowed slope still sees the sky — but the sun is 3.3 against
+            // 0.55 of ambient, so the error is small and it costs one multiply.
+            const lit = shadeAt(shade, localX, localZ);
+            _color.r *= lit; _color.g *= lit; _color.b *= lit;
 
             positions[pi++] = localX; positions[pi++] = h; positions[pi++] = -localZ;
             normals[ni++] = nx; normals[ni++] = ny; normals[ni++] = nz;
