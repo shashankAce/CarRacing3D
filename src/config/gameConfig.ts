@@ -149,7 +149,7 @@ export const gameConfig = {
          * KEEP THIS EVEN — chunks are indexed by their min corner, so an even
          * count straddles x=0 and an odd one sits lopsided.
          */
-        chunksWide: 6,
+        chunksWide: 4,
         /**
          * Draw distance, in chunks. Derived FROM `world.fogDensity` and
          * `world.fogFalloff`, not chosen independently: the spawn edge has to be
