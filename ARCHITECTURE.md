@@ -105,10 +105,23 @@ touching the renderer:
   The cheap dial to pull if we're fill-rate bound.
 - `pauseOnHide` / `pauseOnBlur`, `showStats` (FPS overlay — keep on in dev).
 
-## 3. NoonEngine 3D — the facts that will bite you
+## 3. 3D — the facts that will bite you
+
+**Two different layers live in this list, and knowing which is which changes
+where you go to check it.** Items tagged **[three.js]** are upstream three.js
+behaviour: verify them in `node_modules/three/build/three.module.js`, they
+survive a NoonEngine upgrade, and they are searchable against three's own issues
+and source. Everything untagged is **NoonEngine**: verify it in
+`engine/types/3d/*.d.ts` or `node_modules/noonengine`, and re-check it if the
+engine is ever bumped.
+
+The list started as pure NoonEngine and drifted, which is worth naming: items 5
+and 15-18 were all found while debugging this game and filed here without the
+distinction, so anyone hunting a shader or render-target problem in "the engine"
+was being pointed at the wrong layer entirely. If you add an item, tag it.
 
 Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
-`engine/types/3d/*.d.ts` **[all verified]**.
+`engine/types/3d/*.d.ts`, and three.js 0.185.1 **[all verified]**.
 
 1. **3D renders before the 2D pass.** `ThreeSceneSystem.render()` is called
    once per frame by `WebGLBatchRenderer` *before* 2D. So the whole NoonEngine
@@ -129,7 +142,7 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
    `instanced.object3D.count = n` (the raw THREE property, free) and
    `object3D.instanceMatrix.needsUpdate = true`. This is exactly what
    `Procedural_3D_world/src/scatter/lodBuckets.js` does.
-5. **Set `frustumCulled = false` on any InstancedMesh whose instances are
+5. **[three.js]** **Set `frustumCulled = false` on any InstancedMesh whose instances are
    spread far from the geometry's local origin.** Otherwise the batch gets
    silently culled out of the *shadow* pass (still visible in the main view,
    casting no shadow) — see the comment in `lodBuckets.js`.
@@ -177,7 +190,8 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
     the third arg is the **target node** (null = fires on every event, no
     hit-test), the fourth is the callback's `this`. `off(type, cb, target)`
     takes no context and matches on callback reference.
-15. **A custom `ShaderMaterial` gets NO output colour-space conversion.**
+15. **[three.js]** **A custom `ShaderMaterial` gets NO output colour-space
+    conversion.**
     three.js appends `#include <colorspace_fragment>` only inside its own
     materials' sources. A shader that writes `gl_FragColor` itself must include
     it, or linear values land untouched in an sRGB framebuffer and render far
@@ -196,7 +210,7 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
       one in this project; check any new one against a built-in material showing
       the same colour before trusting the look.
 
-16. **`project_vertex` applies the instance matrix to `mvPosition`, NOT to
+16. **[three.js]** **`project_vertex` applies the instance matrix to `mvPosition`, NOT to
     `transformed`.** The chunk reads
     `vec4 mvPosition = vec4(transformed, 1.0); #ifdef USE_INSTANCING mvPosition
     = instanceMatrix * mvPosition; #endif`, so any injected code that needs a
@@ -217,7 +231,8 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
     whole batch. Cost of not knowing: the road markers were the only receiver in
     the scene with no shadow on them, and nothing in the shader looked wrong,
     because for non-instanced receivers the same line is correct.
-17. **A quad whose axes come from the light has a SUN-DEPENDENT winding.** If a
+17. **[three.js / GL]** **A quad whose axes come from the light has a
+    SUN-DEPENDENT winding.** If a
     quad's two edge vectors are derived from the light direction, and the pass
     maps world Z to NDC y (as a top-down mask does), then its screen-space
     winding is a function of the light azimuth and **flips as the light goes
@@ -231,7 +246,7 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
       all, so a cost measurement looks healthy on a pass that is doing nothing.
       Verify an auxiliary pass by reading its target's pixels, never by its
       draw counters.
-18. **`renderer.info` resets on every `render()` call.** Any auxiliary pass run
+18. **[three.js]** **`renderer.info` resets on every `render()` call.** Any auxiliary pass run
     during `update` — before the engine draws the scene — therefore overwrites
     the counters the perf HUD reads in that same frame. A 1-draw mask pass turned
     the HUD's draw count from ~97 into a constant 1. Snapshot
@@ -1009,7 +1024,10 @@ src/
   attached to every lit receiver. Plus `procedural/terrainShadow.ts`, terrain
   self-shadowing baked into the vertex colour at chunk build (2.15x build cost,
   ~+1.2ms/chunk on a low-end phone estimate). §5.9 rewritten in full; three new
-  engine gotchas in §3 (16-18). Bundle **994.8KB / 2MB**.
+  **three.js** gotchas in §3 (16-18) — and §3 retitled and tagged, because it
+  claimed to be a NoonEngine list while items 5 and 15-18 are all upstream
+  three.js, which sends anyone debugging a shader or render target to the wrong
+  layer. Bundle **994.8KB / 2MB**.
   Four rounds of being wrong, all worth recording:
   I twice told the owner a limitation was "structural" when it was not — tree
   shadows draping (solved by moving the lookup into the ground shader) and tree
