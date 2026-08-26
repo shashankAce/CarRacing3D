@@ -196,6 +196,48 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
       one in this project; check any new one against a built-in material showing
       the same colour before trusting the look.
 
+16. **`project_vertex` applies the instance matrix to `mvPosition`, NOT to
+    `transformed`.** The chunk reads
+    `vec4 mvPosition = vec4(transformed, 1.0); #ifdef USE_INSTANCING mvPosition
+    = instanceMatrix * mvPosition; #endif`, so any injected code that needs a
+    world position has to re-apply the instance (and batching) matrix itself,
+    under the same `#ifdef`s:
+    ```glsl
+    vec4 p = vec4(transformed, 1.0);
+    #ifdef USE_BATCHING
+        p = batchingMatrix * p;
+    #endif
+    #ifdef USE_INSTANCING
+        p = instanceMatrix * p;
+    #endif
+    vWorld = (modelMatrix * p).xyz;
+    ```
+    `modelMatrix * transformed` alone compiles, runs, and gives **every instance
+    of an InstancedMesh the mesh's own origin** — one single position for the
+    whole batch. Cost of not knowing: the road markers were the only receiver in
+    the scene with no shadow on them, and nothing in the shader looked wrong,
+    because for non-instanced receivers the same line is correct.
+17. **A quad whose axes come from the light has a SUN-DEPENDENT winding.** If a
+    quad's two edge vectors are derived from the light direction, and the pass
+    maps world Z to NDC y (as a top-down mask does), then its screen-space
+    winding is a function of the light azimuth and **flips as the light goes
+    round**. No fixed index order is correct for every sun angle, so the face
+    test has to be off (`side: DoubleSide`) — that is a requirement, not
+    laziness, and it will read as a pointless de-optimisation to anyone who
+    finds it later.
+    - The failure mode is what makes this expensive: `renderer.info.render`
+      counts triangles **submitted, not rasterised**. A fully culled pass
+      reports its draw call and its full triangle count while writing nothing at
+      all, so a cost measurement looks healthy on a pass that is doing nothing.
+      Verify an auxiliary pass by reading its target's pixels, never by its
+      draw counters.
+18. **`renderer.info` resets on every `render()` call.** Any auxiliary pass run
+    during `update` — before the engine draws the scene — therefore overwrites
+    the counters the perf HUD reads in that same frame. A 1-draw mask pass turned
+    the HUD's draw count from ~97 into a constant 1. Snapshot
+    `info.calls/triangles/points/lines` and restore them around any extra pass,
+    and report that pass's own cost separately.
+
 ## 4. Procedural_3D_world — exactly what to take
 
 Path: `/Users/schaurasiya/ShashankWorkspace/Procedural_3D_world`.
@@ -555,29 +597,123 @@ of the screen that terrain then paints over. The price is that the dome must
 ENCLOSE all geometry — hence `sky.domeRadius` 350 against a farthest terrain
 corner of 305m, and `camera.far` 400 to contain it.
 
-### 5.9 Shadows: affordable, but only just
-This section previously said to ship a fake blob shadow and keep real shadows
-behind a flag. Real shadows are in, and they do work on a low-end phone — but
-only after being cut hard, and they remain the largest of the three costs above.
-What made them viable:
+### 5.9 Shadows: in the lighting equation, or not at all
 
-- **512 map, not 1024** (quarters the depth pass's fill), with the orthographic
-  frustum halved 70→40m alongside it so texel density — and therefore edge
-  quality — stays roughly where it was.
-- **The frustum follows the car.** A directional light's shadow map covers only
-  the box its camera sees, so a fixed light drops shadows entirely a few tens of
-  metres into an infinite run. The target leads the car slightly, since the road
-  ahead is what the player is looking at.
-- **Ruthless caster selection.** Car body and cabin, traffic, and trees cast.
-  Wheels don't (inside the body's own shadow at any sun angle that isn't
-  near-horizontal). Roadside posts don't — "one instanced draw, nearly free" was
-  wrong: it's 64 more boxes rasterised into the map every frame for thin slivers
-  on the verge. Terrain receives but never casts; hills shadowing each other is
-  a second pass over the heaviest geometry in the scene for something fog hides
-  at any distance where it would be visible.
+This section has been rewritten twice. It first said to ship a fake blob shadow.
+It then said real shadow maps were in and viable at 512. Both are superseded:
+the shadow map was rejected by the owner on **quality**, not cost, and the baked
+decal quads that replaced it were rejected for looking like plates under the car.
 
-`lighting.shadows.enabled` is still the switch to reach for first if a reskin
-targets weaker hardware.
+**The single lesson worth keeping.** A shadow is not a dark shape on the ground,
+it is the absence of the sun. Every technique that composites darkness ON TOP of
+already-lit ground reads as a sticker no matter how good its silhouette is:
+uniform alpha, a hard edge, no hue shift, and a visible separation at grazing
+angles. Three separate attempts failed on this, and it was diagnosed twice as a
+placement problem before the actual cause landed — it is not *where* the shadow
+is drawn, it is **where in the pipeline it is applied**.
+
+Anything that works injects after `#include <lights_fragment_begin>` and scales
+`reflectedLight.directDiffuse` / `directSpecular` only. Ambient and the env map
+survive, so shadow shifts cool as well as dark. And there is no quad, so
+"draping over irregular terrain" — the problem that consumed the decal attempt —
+simply stops existing: each fragment resolves its own shadow at its own position.
+
+**Two mechanisms, split by caster count.**
+
+| | casters | mechanism | per frame |
+|---|---|---|---|
+| car, traffic | ~6 | uniform slots, `ProjectedShadows` | 0 draws |
+| trees | 400 | top-down texture, `TreeShadowMask` | 1 instanced draw, ~276 tris |
+
+The split is forced: uniform slots cannot hold 400 casters, and a texture
+cannot be sampled on a vertical surface without smearing (see below). Both share
+one silhouette atlas and one `onBeforeCompile` patch, attached to **every** lit
+receiver — terrain, road, markers, traffic, the car. The ground is not special.
+
+**Sample in the LIGHT's frame, not on the ground plane.** The obvious
+formulation projects the silhouette onto the ground and samples it by world XZ.
+That is correct for flat ground and smears on everything else, because every
+point of a vertical surface at one XZ reads the same value. Instead use
+`r = dot(rel, R)`, `u = dot(rel, U)`, `d = -dot(rel, S)` — a shadow-map lookup
+with the depth test removed. Correct on any surface orientation, and the
+`1/sin(elevation)` stretch falls out for free rather than being applied by hand,
+which is one fewer sign to get wrong.
+
+**Having no depth test costs exactly two things, and both need handling.** A
+shadow would otherwise reach infinitely down-light (`fadeNear`/`fadeFar` bound
+it) and would fall on surfaces between the caster and the sun (`d <= 0` rejects
+those). What cannot be recovered is a caster shadowing ITSELF, since that is the
+case the depth test exists for — hence `attach`'s `skip` option, so the car's own
+material opts out of its own silhouette rather than darkening its whole
+down-light half on top of what N·L already does.
+
+**The tree mask needs an occluder-HEIGHT channel, not just coverage.** A
+ground-indexed mask answers "is the ray arriving at this ground point blocked".
+A fragment 1.7m up is lit by a ray that meets the ground `|S.xz|/S.y` metres
+further down-light — 2.2m per metre of height at a 24° sun, 4.6m at 12° — so the
+lookup must be unprojected along the light first. That much is exact
+(`lift · R = 0` and `lift · U_xz = U.y`, verified to six decimals). But
+unprojection alone still says only "blocked somewhere", and a raised receiver
+needs "blocked ABOVE me": without the height test it picks up **~11m of spurious
+shadow on the sunward side of every tree**, so the shadow on a car begins well
+before the shadow on the road. Two misaligned shadows look worse than one
+missing one. So the atlas carries coverage in alpha and the highest blocking
+geometry in red, written under MAX blending. Measured against analytic ray
+occlusion, height rejection holds IoU at **0.998** across receiver heights where
+coverage alone decays to 0.938.
+
+**Resolution is the honest limitation.** A per-caster atlas cell is a fixed
+budget for one object; a mask spreads its texels over a whole window.
+
+| | texels/m |
+|---|---|
+| vehicle — 256² cell over a ~3m footprint | ~85 |
+| tree — 1024² mask over a 160m window | 6.4 |
+| the rejected 512 shadow map over its reach | ~7 |
+
+The 13× vehicle/tree gap is structural and cannot be tuned away. Note the mask
+still beats the shadow map it replaced, and that **a low sun makes tree shadows
+worse**: shadow length is `1/tan(elevation)`, so a 14m tree throws 31m at 24°
+and 65m at 12° — the same cell stretched over twice the ground.
+
+**Terrain self-shadowing is a separate feature, and a disappointing one.** The
+terrain mesh has only ever carried `receiveShadow`, so hills have never shaded
+valleys under any setting — no shadow technique addresses it, because terrain is
+not a caster. `terrain.selfShadow` marches toward the light on a coarse lattice
+at chunk build time and multiplies the result into the vertex colour, so it costs
+nothing per frame. It was expected to matter and mostly does not: cast shadow
+needs terrain steeper than the sun's elevation, and this height field's median
+slope is 15°.
+
+| sun elevation | terrain in shadow |
+|---|---|
+| 52° | **0.0%** |
+| 24° | 3.0% |
+| 12° | 17.8% |
+| 6° | 39.4% |
+
+And at 12°, only 3.2% of terrain is sun-facing yet shadowed — the part `N·L`
+cannot already produce. Kept because it is nearly free and because Phase 6
+replaces `ambientHeightAt` with a real fbm + ridged field whose sharper relief is
+exactly what makes it pay.
+
+**Verification: a symmetric test cannot detect a symmetry error.** Three sign
+bugs in this work were each caught by comparing two independent formulations,
+and none would have been caught by checking the result looked plausible:
+- The mask's across axis was `-R` instead of `+R`. A mirrored rectangle **is**
+  the same rectangle, so every check on placement, extent and direction passed
+  while every silhouette was flipped. Only comparing the mask's UV against the
+  light-frame UV showed it: 1.43 error against 0.0000.
+- Aggregate agreement is a useless metric when the positive class is rare. A
+  shadow footprint is ~11% of a test grid, so "everything is lit" already scores
+  89%. Use IoU over the shadowed set.
+- Pixels, not counters, for an auxiliary pass — see §3 item 17.
+
+`lighting.shadows.enabled` (the real map) is still present and switchable.
+`lighting.bakedShadows` is the dead decal path, kept only until it is deleted.
+
+**Not yet measured on device:** the mask pass's fill, and the per-fragment cost
+on vehicle materials. Every number above is static analysis or a readback.
 
 ## 6. Decisions
 
@@ -861,3 +997,33 @@ src/
   Process note: I spent several turns reporting pack size from a grep of the
   `Total:` line while the pack was in fact FAILING (an unembeddable `.rar` in
   `res/`, over the 1-file limit). Read the whole pack output.
+
+- **2026-08-26** — **Shadows rebuilt.** The real shadow map was rejected by the
+  owner on quality (a 512 map over its reach resolves ~7 texels/m); the baked
+  decal quads that replaced it were rejected for reading as plates under the
+  car. Replaced by two mechanisms that both modulate lighting inside the
+  receiver's shader — `world/ProjectedShadows.ts` (car and traffic, uniform
+  slots, 0 extra draws, ~85 texels/m) and `world/TreeShadowMask.ts` (400 trees
+  in one top-down texture, 1 instanced draw, ~276 tris) — sharing one silhouette
+  atlas (`procedural/shadowSilhouette.ts`) and one `onBeforeCompile` patch
+  attached to every lit receiver. Plus `procedural/terrainShadow.ts`, terrain
+  self-shadowing baked into the vertex colour at chunk build (2.15x build cost,
+  ~+1.2ms/chunk on a low-end phone estimate). §5.9 rewritten in full; three new
+  engine gotchas in §3 (16-18). Bundle **994.8KB / 2MB**.
+  Four rounds of being wrong, all worth recording:
+  I twice told the owner a limitation was "structural" when it was not — tree
+  shadows draping (solved by moving the lookup into the ground shader) and tree
+  shadows on vehicles (solved by unprojecting along the light, then by adding an
+  occluder-height channel). Both times the owner pushed back and was right; both
+  times my claim rested on the formulation I happened to have rather than on
+  anything inherent. "Structural" needs a derivation, not an intuition.
+  I also reported cost figures for a pass that was producing an entirely empty
+  texture, because `info.triangles` counts submitted triangles and the pass was
+  fully backface-culled — see §3 item 17. And I reported an FPS drop that was a
+  hitch from my own concurrent build; three repeat runs showed no change.
+  Process note that worked: every sign convention in this work was verified by
+  comparing two independent formulations numerically (light-frame vs mask UV,
+  mask lookup vs analytic ray/box occlusion) rather than by looking at a render.
+  All three sign bugs were found that way and none would have survived to the
+  owner; the two failures above are both cases where I reasoned instead of
+  measuring.

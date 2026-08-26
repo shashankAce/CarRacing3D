@@ -147,6 +147,31 @@ Open that URL in a browser and check:
 `npm run build` produces a production bundle (trimmed by default); it is not
 a substitute for actually running `npm run dev` and looking at the result.
 
+**In this project, LOOKING at the result is the project owner's job** — hand
+over the dev URL and wait. That makes your own verification numeric, and there
+are four traps in doing it well. All four cost real time on the 2026-08-26
+shadow work (ARCHITECTURE.md §5.9):
+
+1. **Compare two independent formulations, not one result against your
+   expectation.** Every sign bug in that work was found by computing the same
+   quantity two ways and diffing (a shader's UV against the closed-form UV; a
+   lookup against analytic ray/box occlusion). None would have been caught by
+   deciding a number looked plausible.
+2. **A symmetric test cannot detect a symmetry error.** A mirrored rectangle is
+   the same rectangle, so checks on position, size and direction all passed
+   while every shadow silhouette was flipped. Test the mapping, not the region.
+3. **Aggregate agreement is useless when the positive class is rare.** A shadow
+   covers ~11% of a test grid, so "nothing is in shadow" already scores 89%. Use
+   IoU over the positive set, or you will read a broken result as a good one.
+4. **Counters are not output.** `renderer.info` counts work SUBMITTED. A fully
+   culled pass reports its draw call and its whole triangle count while writing
+   an empty texture — so cost numbers looked healthy for a feature that was
+   rendering nothing. Read the target's pixels.
+
+And when a number surprises you, re-run before reporting it: a one-off frame-time
+spike on that day turned out to be a concurrent `npm run build`, not a
+regression.
+
 ## Rule 4 — Project layout (where things go)
 
 - `src/index.js` (or `.ts`) — entry point; constructs `GameEngine`, defines
