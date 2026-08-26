@@ -36,7 +36,7 @@ import { smoothstep } from './math';
 // `world.fogFalloff` now removes only 15% there, so this palette over-delivers —
 // if the near field reads garish rather than vivid, desaturate HERE rather than
 // thickening the fog, which is doing a different job (see fogCurve.ts).
-// Olive rather than green, matched to res/gameplay_ref.jpg the same way as the
+// Olive rather than green, matched to reference/gameplay_ref.jpg the same way as the
 // foliage: reference hue and saturation, our lightness. Sampled grass there is
 // rgb(169,166,77) lit and rgb(141,137,80) mid — red and green within 4 of each
 // other, i.e. khaki. Ours was rgb(136,196,85), green 60 above red.

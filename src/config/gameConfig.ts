@@ -757,7 +757,7 @@ export const gameConfig = {
          * 0.55, down from 0.8, with `sunIntensity` raised to compensate — the
          * pair stretches dynamic range rather than changing overall exposure.
          *
-         * Measured against res/gameplay_ref.jpg with the same foliage filter and
+         * Measured against reference/gameplay_ref.jpg with the same foliage filter and
          * the same percentiles on both images: the reference spans 5.0x from its
          * darkest to brightest foliage, ours spanned 3.5x. Our lit level was
          * already close; it was the shadow side sitting too high, which is what
@@ -938,7 +938,7 @@ export const gameConfig = {
         trunkSegments: 5,
         canopySegments: 6,
         /**
-         * Matched to res/gameplay_ref.jpg by taking the reference's HUE and
+         * Matched to reference/gameplay_ref.jpg by taking the reference's HUE and
          * SATURATION and keeping our own lightness — the reference values are
          * final rendered pixels, already lit and fogged, so pasting them into
          * base-colour slots would double-count the exposure.
@@ -1065,7 +1065,7 @@ export const gameConfig = {
         /** RESOLVED AT BOOT from the pair above. See `resolveTimeOfDay()`. */
         zenithLowColor: 0x4a3a78,
         /**
-         * LEFT ALONE deliberately when matching res/gameplay_ref.jpg.
+         * LEFT ALONE deliberately when matching reference/gameplay_ref.jpg.
          *
          * The reference's horizon band samples rgb(215,244,242) — near-white —
          * and setting this to that DID land closer to it. It also made the top

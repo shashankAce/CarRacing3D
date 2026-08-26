@@ -7,7 +7,7 @@ import * as THREE from 'three';
  * shipped: a 2MB budget cannot spare a road texture, and the alternative was a
  * flat vertex colour that read as painted card.
  *
- * ## Calibrated against res/road_texture.png, because the first pass was wrong
+ * ## Calibrated against reference/road_texture.png, because the first pass was wrong
  *
  * Measured on the reference (asphalt region only, painted line excluded):
  *
