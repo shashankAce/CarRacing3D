@@ -171,21 +171,17 @@ export class TrafficSystem {
             if (v.lodModel) v.group.object3D.remove(v.lodModel);
             const spec = cfg.traffic.types[v.modelType];
             const visual = models.create(spec.model);
-            // VehicleModels rests a visual on local y=0. Traffic placement uses
-            // a centre-origin group for its existing collision/shadow proxies.
-            visual.root.position.y -= spec.height / 2;
-            // The group is centre-origin, so capture the same shifted local
-            // geometry the renderer sees. Only one copy per type is needed.
+            // VehicleModels rests each visual on y=0. Traffic uses the same
+            // wheel/ground pivot as PlayerCar, so matching models have matching
+            // placement and scale in both roles.
             if (this._modelShadowGeometries[v.modelType].length === 0) {
                 this._modelShadowGeometries[v.modelType] = visual.shadowGeometries;
-                for (const geometry of visual.shadowGeometries) geometry.translate(0, -spec.height / 2, 0);
             }
             v.model = visual.root;
             v.spinWheels = visual.spinWheels;
             v.group.object3D.add(v.model);
             const lodVisual = models.create(spec.model, 'distant');
-            // The compact LOD shares the full model's normalized local origin.
-            lodVisual.root.position.y -= spec.height / 2;
+            // The compact LOD shares the full model's ground-pivot origin.
             v.lodModel = lodVisual.root;
             v.lodModel.visible = false;
             v.spinLodWheels = lodVisual.spinWheels;
@@ -436,14 +432,12 @@ export class TrafficSystem {
      * shape depends on its aspect ratio, so a bus is not a stretched car. Four
      * types, four cells in the atlas.
      *
-     * The geometry is the CENTRED box, matching `_place`, which puts the group
-     * origin at `surfaceHeight + height/2`. The decal path registered the same
-     * centred box but submitted the GROUND height, a half-height error that is
-     * part of why those shadows sat wrong.
+     * The geometry is raised from the wheel/ground pivot, matching `_place`.
      */
     registerProjected(shadows: ProjectedShadows): void {
         this._projectedHandles = cfg.traffic.types.map(type =>
-            shadows.register(new THREE.BoxGeometry(type.width, type.height, type.length)));
+            shadows.register(new THREE.BoxGeometry(type.width, type.height, type.length)
+                .translate(0, type.height / 2, 0)));
     }
 
     /** Replaces the registered box proxies with one normalized FBX capture per type. */
@@ -476,7 +470,8 @@ export class TrafficSystem {
 
     registerShadows(decals: ShadowDecals): void {
         this._shadowHandles = cfg.traffic.types.map(type =>
-            decals.register(new THREE.BoxGeometry(type.width, type.height, type.length)));
+            decals.register(new THREE.BoxGeometry(type.width, type.height, type.length)
+                .translate(0, type.height / 2, 0)));
     }
 
     addShadows(decals: ShadowDecals, travelled: number): void {
@@ -512,7 +507,7 @@ export class TrafficSystem {
         return surfaceHeightAt(x, z);
     }
 
-    /** Lowest centre height that keeps the whole tilted body above the road. */
+    /** Lowest ground-pivot height that keeps the whole tilted body above the road. */
     private _requiredCentreHeight(
         v: TrafficVehicle,
         centreX: number,
@@ -531,7 +526,7 @@ export class TrafficSystem {
                 const localX = xi * v.halfWidth;
                 const localZ = zi * v.halfLength;
                 this._ridePoint
-                    .set(localX, -v.height / 2, localZ)
+                    .set(localX, 0, localZ)
                     .applyQuaternion(this._rideQuaternion);
                 const need = this._heightAtLocal(
                     localX, localZ, centreX, v.worldZ, yaw,
@@ -589,7 +584,7 @@ export class TrafficSystem {
             // buried in it.
             v.indicator.position.set(
                 v.signalDir * (v.halfWidth - s * 0.4),
-                v.height * 0.1,
+                v.height * 0.6,
                 v.halfLength + s * 0.3,
             );
             const phase = Math.floor(this._blinkClock * cfg.traffic.overtake.blinkHz * 2) % 2;

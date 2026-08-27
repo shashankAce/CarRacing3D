@@ -60,6 +60,8 @@ export class PlayerCar {
 
     /** Read by the follow camera. */
     get position(): THREE.Vector3 { return this._group.position; }
+    /** Configured visual height above the ground-pivot origin. */
+    get visualHeight(): number { return this._height; }
 
     /**
      * True while the car is scraping a road edge. Nothing consumes it yet —

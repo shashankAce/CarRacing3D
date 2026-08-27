@@ -868,7 +868,7 @@ export const gameConfig = {
             /** Exponential response toward the requested angle. */
             response: 9,
             /** Body lean at maximum steering yaw and `speed.max`. */
-            maxRollAngle: 0.16,
+            maxRollAngle: 0.05,
             /**
              * Pivot rearward from centre as a fraction of half-length. 0 uses
              * the centre; 1 uses the rear bumper; 0.62 matches the rear axle.
@@ -899,7 +899,7 @@ export const gameConfig = {
      * `height` makes the same m/s feel slower, every time.
      */
     camera: {
-        fov: 68,
+        fov: 70,
         /**
          * `far` must exceed `sky.domeRadius`, which must in turn exceed the
          * farthest terrain corner (305m at the current chunk window) — the dome
@@ -911,10 +911,10 @@ export const gameConfig = {
         near: 1,
         far: 400,
         /** Offset from the car, in the car's own space. +Z is behind. */
-        height: 4.4,
-        distance: 8.2,
+        height: 5,
+        distance: 12,
         /** Look-at target height, and how far down the road it sits. */
-        lookHeight: 1.3,
+        lookHeight: 5,
         lookAhead: 20,
         followRate: 7,
         /** Extra pull-back at top speed, metres. Keep small — pulling back reduces speed feel. */

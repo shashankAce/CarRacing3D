@@ -38,8 +38,12 @@ export class FollowCamera {
     update(dt: number, car: PlayerCar, speedT: number): void {
         const c = cfg.camera;
         const distance = c.distance + speedT * c.distanceSpeedGain;
+        // Player movement stays ground-pivoted. Frame from the visual centre
+        // so camera height follows whichever car is selected without affecting
+        // steering, speed, collision, or suspension behaviour.
+        const baseY = car.position.y + car.visualHeight * 0.5;
 
-        this._desired.set(car.position.x, car.position.y + c.height, car.position.z + distance);
+        this._desired.set(car.position.x, baseY + c.height, car.position.z + distance);
 
         const k = 1 - Math.exp(-c.followRate * dt);
         const pos = this._camera.position;
@@ -50,7 +54,7 @@ export class FollowCamera {
         // sideways — the world would appear to swing rather than slide. Using
         // the camera's own x keeps the view axis permanently parallel to -Z, so
         // steering reads as pure lateral translation.
-        this._lookAt.set(pos.x, car.position.y + c.lookHeight, pos.z - c.lookAhead);
+        this._lookAt.set(pos.x, baseY + c.lookHeight, pos.z - c.lookAhead);
         this._camera.lookAt(this._lookAt.x, this._lookAt.y, this._lookAt.z);
 
         // A slightly wider FOV at speed stretches the periphery and reads as
@@ -64,8 +68,9 @@ export class FollowCamera {
     snapTo(car: PlayerCar): void {
         const c = cfg.camera;
         const pos = this._camera.position;
-        pos.set(car.position.x, car.position.y + c.height, car.position.z + c.distance);
+        const baseY = car.position.y + car.visualHeight * 0.5;
+        pos.set(car.position.x, baseY + c.height, car.position.z + c.distance);
         this._camera.fov = c.fov;
-        this._camera.lookAt(pos.x, car.position.y + c.lookHeight, pos.z - c.lookAhead);
+        this._camera.lookAt(pos.x, baseY + c.lookHeight, pos.z - c.lookAhead);
     }
 }
