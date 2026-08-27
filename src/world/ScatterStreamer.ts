@@ -363,7 +363,9 @@ export class ScatterStreamer {
                         // which has no height axis, but kept so the two paths
                         // cannot drift apart.
                         p.y + cfg.trees.sinkDepth,
-                        travelled - p.z,
+                        // Absolute Z lets the mask keep its instance buffer
+                        // stable and apply world scroll once in the shader.
+                        p.z,
                         p.scale,
                     );
                 }

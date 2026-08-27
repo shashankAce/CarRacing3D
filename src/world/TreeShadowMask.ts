@@ -26,12 +26,13 @@ import { lightFrame, bakeShadowAtlas, type ShadowAtlas } from '../procedural/sha
  * whatever height that fragment actually sits at — so it drapes over any terrain
  * by construction, and burial is not a thing that can happen.
  *
- * ## Why it is redrawn every frame rather than scrolled
+ * ## Why the target is redrawn every frame
  *
- * The world scrolls in render space, so every tree's render Z changes each
- * frame and an incrementally-updated buffer would have to be reprojected
- * anyway. A full redraw is one instanced draw into a small target — cheaper than
- * the bookkeeping to avoid it, and it cannot drift out of sync.
+ * The mask window is camera-relative, so its pixels represent different ground
+ * as the car advances. A full redraw is one instanced draw into a small target
+ * and cannot drift out of sync. The INSTANCE BUFFERS do not need to follow that
+ * movement, though: centres are anchored in world Z and one uniform scrolls the
+ * complete batch. They upload only when the visible caster set changes.
  *
  * ## Known limits
  *
@@ -53,7 +54,7 @@ export class TreeShadowMask {
     private _mesh: THREE.Mesh;
     private _material: THREE.ShaderMaterial;
 
-    /** Per-instance attributes, written each frame from `add`. */
+    /** Per-instance attributes, compared and rewritten from `add`. */
     private _centre: THREE.InstancedBufferAttribute;
     private _along: THREE.InstancedBufferAttribute;
     private _across: THREE.InstancedBufferAttribute;
@@ -61,6 +62,13 @@ export class TreeShadowMask {
     private _geometry: THREE.InstancedBufferGeometry;
 
     private _live = 0;
+    private _previousLive = 0;
+    private _centreDirty = false;
+    private _alongDirty = false;
+    private _acrossDirty = false;
+    private _cellDirty = false;
+    /** World travel origin represented by the current centre buffer. */
+    private _anchor = Number.NaN;
     /** World-space rect the mask currently covers: x0, z0, size. */
     private _rect = new THREE.Vector3();
 
@@ -107,6 +115,7 @@ export class TreeShadowMask {
                 uAtlas: { value: null },
                 uGrid: { value: new THREE.Vector4(1, 1, 1, 1) },
                 uRect: { value: new THREE.Vector3() },
+                uScrollZ: { value: 0 },
             },
             vertexShader: `
                 attribute vec2 corner;
@@ -115,11 +124,13 @@ export class TreeShadowMask {
                 attribute vec2 iAcross;
                 attribute float iCell;
                 uniform vec3 uRect;
+                uniform float uScrollZ;
                 varying vec2 vCellUv;
                 varying float vCell;
                 void main() {
                     // Ground position of this quad corner, in render-space XZ.
                     vec2 p = iCentre + iAcross * corner.x + iAlong * corner.y;
+                    p.y += uScrollZ;
                     // Straight to clip space: the mask is an axis-aligned window,
                     // so there is no camera worth constructing for it.
                     vec2 ndc = (p - uRect.xy) / uRect.z * 2.0 - 1.0;
@@ -209,17 +220,29 @@ export class TreeShadowMask {
      * movement makes every shadow edge crawl as the car drives, which reads as
      * the shadows shimmering rather than the world moving.
      */
-    begin(carX: number): void {
+    begin(carX: number, travelled: number): void {
         const ts = cfg.lighting.treeShadows;
         const size = ts.windowSize;
         const texel = size / ts.maskSize;
+        // Keep both the instance centres and the shared offset small throughout
+        // an infinite run. `add` will rewrite the live centres on this frame,
+        // and its equality checks turn this periodic rebase into one upload.
+        if (!Number.isFinite(this._anchor) || Math.abs(travelled - this._anchor) >= 512) {
+            this._anchor = travelled;
+        }
+        this._material.uniforms.uScrollZ.value = travelled - this._anchor;
         // Forward is -Z, so biasing ahead means shifting the window negative.
         const cz = -size * ts.forwardBias;
         const x0 = Math.round((carX - size * 0.5) / texel) * texel;
         const z0 = Math.round((cz - size * 0.5) / texel) * texel;
         this._rect.set(x0, z0, size);
         (this._material.uniforms.uRect.value as THREE.Vector3).copy(this._rect);
+        this._previousLive = this._live;
         this._live = 0;
+        this._centreDirty = false;
+        this._alongDirty = false;
+        this._acrossDirty = false;
+        this._cellDirty = false;
     }
 
     /**
@@ -227,7 +250,7 @@ export class TreeShadowMask {
      * height axis, which is exactly why it drapes — but the caller still passes
      * the real surface so the signature matches the decal path it replaces.
      */
-    add(handle: number, x: number, _groundY: number, z: number, scale: number): void {
+    add(handle: number, x: number, _groundY: number, worldZ: number, scale: number): void {
         if (this._atlas === null) return;
         const max = this._cell.count;
         if (this._live >= max) return;
@@ -258,37 +281,73 @@ export class TreeShadowMask {
         //   so  R.x = -ground.z  and  R.z = ground.x
         const gx = f.groundX, gz = f.groundZ;
         const cx = x + gx * offAlong - gz * offAcross;
-        const cz = z + gz * offAlong + gx * offAcross;
+        // Store Z relative to a rolling world anchor. The shader adds the
+        // current travel delta, producing `travelled - worldZ` without changing
+        // this attribute on every frame.
+        const cz = this._anchor - worldZ + gz * offAlong + gx * offAcross;
+        const renderCz = Math.fround(cz)
+            + (this._material.uniforms.uScrollZ.value as number);
 
         // Cheap reject: anything whose footprint cannot touch the window is not
         // worth an instance slot, and the near buckets hold trees well outside
         // it. Conservative — the radius is the footprint's own half-diagonal.
         const reach = (Math.abs(along) + Math.abs(across)) * 0.5;
         if (cx + reach < r.x || cx - reach > r.x + r.z
-            || cz + reach < r.y || cz - reach > r.y + r.z) return;
+            || renderCz + reach < r.y || renderCz - reach > r.y + r.z) return;
 
         const i = this._live++;
-        this._centre.array[i * 2] = cx;
-        this._centre.array[i * 2 + 1] = cz;
-        this._along.array[i * 2] = gx * along;
-        this._along.array[i * 2 + 1] = gz * along;
-        this._across.array[i * 2] = -gz * across;
-        this._across.array[i * 2 + 1] = gx * across;
-        this._cell.array[i] = cell.cell;
+        const centre = this._centre.array;
+        const alongArray = this._along.array;
+        const acrossArray = this._across.array;
+        const cellArray = this._cell.array;
+        const j = i * 2;
+        // Compare in the attribute's real storage precision. Comparing its
+        // float32 value with an unrounded JS double would report a false change
+        // on almost every frame and silently defeat this optimization.
+        const centreX = Math.fround(cx), centreZ = Math.fround(cz);
+        const alongX = Math.fround(gx * along), alongZ = Math.fround(gz * along);
+        const acrossX = Math.fround(-gz * across), acrossZ = Math.fround(gx * across);
+
+        if (centre[j] !== centreX || centre[j + 1] !== centreZ) {
+            centre[j] = centreX; centre[j + 1] = centreZ;
+            this._centreDirty = true;
+        }
+        if (alongArray[j] !== alongX || alongArray[j + 1] !== alongZ) {
+            alongArray[j] = alongX; alongArray[j + 1] = alongZ;
+            this._alongDirty = true;
+        }
+        if (acrossArray[j] !== acrossX || acrossArray[j + 1] !== acrossZ) {
+            acrossArray[j] = acrossX; acrossArray[j + 1] = acrossZ;
+            this._acrossDirty = true;
+        }
+        if (cellArray[i] !== cell.cell) {
+            cellArray[i] = cell.cell;
+            this._cellDirty = true;
+        }
     }
 
     /** Uploads the instance data. Call after the last `add`. */
     commit(): void {
         this._geometry.instanceCount = this._live;
         if (this._live === 0) return;
-        this._centre.needsUpdate = true;
-        this._along.needsUpdate = true;
-        this._across.needsUpdate = true;
-        this._cell.needsUpdate = true;
-        this._centre.updateRanges = [{ start: 0, count: this._live * 2 }];
-        this._along.updateRanges = [{ start: 0, count: this._live * 2 }];
-        this._across.updateRanges = [{ start: 0, count: this._live * 2 }];
-        this._cell.updateRanges = [{ start: 0, count: this._live }];
+        // A shorter list only changes instanceCount. A longer list whose tail
+        // happens to match already-uploaded stale data also needs no transfer;
+        // the element comparisons in `add` are the source of truth.
+        const rangeLive = Math.max(this._live, this._previousLive);
+        this._uploadIfDirty(this._centre, this._centreDirty, rangeLive * 2);
+        this._uploadIfDirty(this._along, this._alongDirty, rangeLive * 2);
+        this._uploadIfDirty(this._across, this._acrossDirty, rangeLive * 2);
+        this._uploadIfDirty(this._cell, this._cellDirty, rangeLive);
+    }
+
+    private _uploadIfDirty(
+        attribute: THREE.InstancedBufferAttribute,
+        dirty: boolean,
+        count: number,
+    ): void {
+        if (!dirty) return;
+        attribute.updateRanges = [{ start: 0, count }];
+        attribute.needsUpdate = true;
     }
 
     /**

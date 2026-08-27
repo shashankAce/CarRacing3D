@@ -277,7 +277,7 @@ export class GameScene extends Scene {
             this._terrain.update();
             this._road.update();
             // Opened BEFORE the scatter sync, which is what pushes the trees.
-            this._treeMask?.begin(this._car.position.x);
+            this._treeMask?.begin(this._car.position.x, travelled);
             // The car's own y is the road surface under it (the wheels rest on
             // the ground), which is the plane every vehicle's lifted lookup is
             // measured from.
