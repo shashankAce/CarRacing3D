@@ -133,6 +133,7 @@ export class TrafficSystem {
             group.object3D.add(body, indicator);
             group.object3D.visible = false;
 
+            const initialSpec = t.types[slotTypes[i % slotTypes.length]];
             this._pool.push({
                 group, body, indicator, model: null, lodModel: null, fullDetail: true,
                 spinWheels: () => {}, spinLodWheels: () => {},
@@ -141,7 +142,11 @@ export class TrafficSystem {
                 desiredSpeed: 0, speed: 0,
                 manoeuvre: Manoeuvre.CRUISING, signalTimer: 0, signalDir: 0,
                 laneYaw: 0, counted: false,
-                halfWidth: 0, halfLength: 0, height: 0,
+                // Config is the pre-load fallback. `attachModels` replaces it
+                // with the scaled FBX's measured bounds before gameplay starts.
+                halfWidth: initialSpec.width / 2,
+                halfLength: initialSpec.length / 2,
+                height: initialSpec.height,
             });
         }
         this.reset();
@@ -169,6 +174,9 @@ export class TrafficSystem {
             if (v.lodModel) v.group.object3D.remove(v.lodModel);
             const spec = cfg.traffic.types[v.modelType];
             const visual = models.create(spec.model);
+            v.halfWidth = visual.dimensions.width / 2;
+            v.halfLength = visual.dimensions.length / 2;
+            v.height = visual.dimensions.height;
             // VehicleModels rests each visual on y=0. Traffic uses the same
             // wheel/ground pivot as PlayerCar, so matching models have matching
             // placement and scale in both roles.
@@ -615,10 +623,6 @@ export class TrafficSystem {
         slot.signalTimer = 0;
         slot.signalDir = 0;
         slot.laneYaw = 0;
-        slot.halfWidth = spec.width / 2;
-        slot.halfLength = spec.length / 2;
-        slot.height = spec.height;
-
         // Indicator on the rear face, offset to whichever side is being signalled
         // — repositioned when a manoeuvre starts, so one mesh covers both sides.
         const s = t.overtake.indicatorSize;

@@ -59,6 +59,8 @@ export class PlayerCar {
 
     /** Read by the follow camera. */
     get position(): THREE.Vector3 { return this._group.position; }
+    /** Current body yaw, used to enclose the rotated visual in its collision box. */
+    get rotationY(): number { return this._group.object3D.rotation.y; }
     /** Configured visual height above the ground-pivot origin. */
     get visualHeight(): number { return this._height; }
 
@@ -126,12 +128,15 @@ export class PlayerCar {
     }
 
     /** Replaces the invisible startup placeholder with the selected FBX clone. */
-    setVisual(visual: VehicleVisual, dimensions: { width: number; height: number; length: number }): void {
+    setVisual(visual: VehicleVisual): void {
         if (this._visual) this._group.object3D.remove(this._visual);
         this._visual = visual.root;
-        this._width = dimensions.width;
-        this._height = dimensions.height;
-        this._length = dimensions.length;
+        // Collision follows the actual post-scale asset bounds. Keeping these
+        // values separate in config allowed a visual scale edit to silently
+        // leave a smaller collider behind.
+        this._width = visual.dimensions.width;
+        this._height = visual.dimensions.height;
+        this._length = visual.dimensions.length;
         this._materials = visual.materials;
         this._shadowGeometries = visual.shadowGeometries;
         this._spinWheels = visual.spinWheels;

@@ -985,10 +985,10 @@ src/
   world freezes, tap restarts with a re-seeded road and no page errors.
   `tsc --noEmit` clean. Pack size **943.7KB / 2MB** (+7KB), draws 67 → 74.
 
-  Known rough edge, deferred to Phase 7: on impact the player's car is left
-  overlapping the vehicle it hit, because there's no separation or crash
-  animation — the run simply stops. It reads as clipping. A short impact
-  sequence (or just backing the car off to contact distance) is the fix.
+  Collision dimensions come from each FBX's measured post-scale bounds, then
+  expand to enclose its yawed footprint. A model-scale edit therefore cannot
+  leave a smaller collider behind, including on bends, while steering, or
+  during a traffic lane change.
 - **2026-08-25** — **Phase 5 done.** Player throttle and fuel, requested after
   the owner played Phase 4. `src/ui/TouchControls.ts` (four hold-to-act buttons),
   throttle + fuel on `GameState` with an `OUT_OF_FUEL` phase, a fuel gauge in the

@@ -796,7 +796,9 @@ export const gameConfig = {
     /**
      * Runtime vehicle catalog. All FBX assets use the same three Unity material
      * names; `VehicleModels` maps them to the settings below. The authored
-     * meshes are hundreds of FBX units wide, hence the shared 0.007 scale.
+     * meshes are hundreds of FBX units wide, hence the small per-model scales.
+     * Runtime collision dimensions are measured from the FBX after this scale
+     * is applied, so changing `scale` cannot leave a smaller collider behind.
      */
     vehicles: {
         paletteTexture: 'res/models/vehicles/PixelColors.png',

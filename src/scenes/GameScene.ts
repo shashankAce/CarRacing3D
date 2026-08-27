@@ -374,8 +374,7 @@ export class GameScene extends Scene {
     private _selectCar(id: VehicleModelId): void {
         if (!this._vehiclesReady || !this._selectingCar) return;
 
-        const spec = this._vehicleModels.spec(id);
-        this._car.setVisual(this._vehicleModels.create(id), spec);
+        this._car.setVisual(this._vehicleModels.create(id));
         this._car.refreshProjectedGeometry(this._projected);
         this._projected.rebake();
         this._attachPlayerMaterials();

@@ -9,6 +9,8 @@ export type VehicleModelId = string;
 export interface VehicleVisual {
     root: THREE.Object3D;
     materials: THREE.Material[];
+    /** Actual post-rotation, post-scale FBX bounds used by gameplay collision. */
+    dimensions: { width: number; height: number; length: number };
     /** Static mesh geometry in the vehicle group's local coordinates, for shadow capture. */
     shadowGeometries: THREE.BufferGeometry[];
     /** Spins the four custom wheel instances by travelled distance in metres. */
@@ -22,6 +24,8 @@ type VehicleDetail = 'full' | 'distant';
 interface VehicleTemplate {
     /** One renderable static mesh per material class for each supported tier. */
     geometries: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry>>;
+    /** Bounds after the configured model scale and rotation have been applied. */
+    dimensions: { width: number; height: number; length: number };
     wheels: WheelPlacement[];
 }
 
@@ -143,7 +147,7 @@ export class VehicleModels {
             }
         }
 
-        return { root, materials, shadowGeometries, spinWheels };
+        return { root, materials, dimensions: template.dimensions, shadowGeometries, spinWheels };
     }
 
     /** Builds the compact, normalised static geometry for one FBX once at load. */
@@ -154,6 +158,8 @@ export class VehicleModels {
         model.scale.setScalar(spec.scale);
         model.updateMatrixWorld(true);
         const bounds = new THREE.Box3().setFromObject(model);
+        const size = bounds.getSize(new THREE.Vector3());
+        const dimensions = { width: size.x, height: size.y, length: size.z };
         const centre = bounds.getCenter(new THREE.Vector3());
         model.position.set(-centre.x, -bounds.min.y, -centre.z);
         model.updateMatrixWorld(true);
@@ -206,7 +212,7 @@ export class VehicleModels {
         // The distant tier still has only one draw per material class, but its
         // body, wheels, glass, lights, doors and interior have each received
         // the same configurable reduction before batching.
-        return { geometries, wheels };
+        return { geometries, dimensions, wheels };
     }
 
     private _appendBatch(

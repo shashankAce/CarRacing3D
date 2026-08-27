@@ -17,11 +17,11 @@ import type { TrafficSystem, TrafficVehicle } from './TrafficSystem';
  * two boxes that overlap in x and z have collided; testing height would only
  * introduce a way to drive through a bus on a slope.
  *
- * Both bodies are tested at their own z. The visual yaw from `roadHeadingAt`
- * and the player's steering tilt are NOT accounted for — the boxes stay
- * axis-aligned. At the road's ~11° maximum heading that understates a car's
- * true footprint by a few centimetres, which is the right way to be wrong:
- * collisions read as slightly forgiving rather than as phantom hits.
+ * Both bodies are tested at their own z. Their boxes stay axis-aligned, but
+ * each half-extent is expanded by the body's current yaw so the AABB encloses
+ * the complete rotated footprint. This matters both while the player steers
+ * and while traffic follows a curve or changes lanes: the collision box must
+ * never become smaller than the visible car.
  */
 export function findCollision(
     car: PlayerCar,
@@ -30,13 +30,22 @@ export function findCollision(
 ): TrafficVehicle | null {
     const carX = car.position.x;
     const carWorldZ = travelled - car.position.z;
-    const halfW = car.halfWidth;
-    const halfL = car.halfLength;
+    const carYaw = car.rotationY;
+    const carCos = Math.abs(Math.cos(carYaw));
+    const carSin = Math.abs(Math.sin(carYaw));
+    const carHalfW = car.halfWidth * carCos + car.halfLength * carSin;
+    const carHalfL = car.halfWidth * carSin + car.halfLength * carCos;
 
     for (const v of traffic.vehicles) {
         if (!v.active) continue;
-        if (Math.abs(v.worldZ - carWorldZ) > v.halfLength + halfL) continue;
-        if (Math.abs(traffic.worldXOf(v) - carX) > v.halfWidth + halfW) continue;
+        const trafficYaw = v.group.object3D.rotation.y;
+        const trafficCos = Math.abs(Math.cos(trafficYaw));
+        const trafficSin = Math.abs(Math.sin(trafficYaw));
+        const trafficHalfW = v.halfWidth * trafficCos + v.halfLength * trafficSin;
+        const trafficHalfL = v.halfWidth * trafficSin + v.halfLength * trafficCos;
+
+        if (Math.abs(v.worldZ - carWorldZ) > trafficHalfL + carHalfL) continue;
+        if (Math.abs(traffic.worldXOf(v) - carX) > trafficHalfW + carHalfW) continue;
         return v;
     }
     return null;
