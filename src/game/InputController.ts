@@ -18,9 +18,8 @@ const TAP_KEYS = ['Space', 'Enter'];
  * are NOT spatial events — `node.on(Input.KEY_DOWN, ...)` routes to the node's
  * own emitter and would never fire. See ARCHITECTURE.md §3 item 11.
  *
- * Touch comes from `TouchControls`. This used to split the screen in half for
- * steering, which was fine for one axis and impossible for two — four controls
- * need four targets.
+ * Touch comes from `TouchControls`: the screen halves steer, while dedicated
+ * gas/brake targets provide the second axis and are excluded from those zones.
  */
 export class InputController {
 

@@ -831,7 +831,7 @@ export const gameConfig = {
         ],
         materials: {
             pixelColors: { roughness: 0.22, metalness: 0.05 },
-            glass: { color: 0x333333, roughness: 0.12, metalness: 0.1, opacity: 0.545, transmission: 0.05 },
+            glass: { color: 0x333333, roughness: 0.12, metalness: 0.1, opacity: 0.545 },
             headlights: { color: 0xffd800, emissive: 0xffb000, emissiveIntensity: 3.5, roughness: 0.3 },
         },
     },

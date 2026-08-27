@@ -19,7 +19,10 @@ interface Button {
 }
 
 /**
- * TouchControls — four hold-to-act buttons: steer left/right, gas, brake.
+ * TouchControls — four hold-to-act buttons plus full-screen steering zones.
+ * A touch outside gas/brake steers left or right according to the screen half
+ * it is currently in. The visible steering buttons remain as affordances, but
+ * the player does not have to hit their small boxes while looking at traffic.
  *
  * Structure per button: a bare parent node carrying the hit box, with the glyph
  * on a CHILD. The parent has no render component on purpose — `LabelSystem`
@@ -42,6 +45,10 @@ export class TouchControls {
     private _buttons: Button[] = [];
     /** Which button each live pointer is holding. */
     private _byPointer = new Map<number, Button>();
+    /** Touch pointers that began in a full-screen steering zone. */
+    private _zonePointers = new Set<number>();
+    private _screenWidth: number;
+    private _enabled = false;
 
     constructor(scene: Scene) {
         const c = cfg.controls;
@@ -51,6 +58,7 @@ export class TouchControls {
         // drifts — and centre-relative offsets pushed the left button off-screen
         // entirely on a narrow phone.
         const width = inputListener.engine?.display?.designWidth ?? cfg.design.width;
+        this._screenWidth = width;
         const left = c.edgeMargin;
         const right = width - c.edgeMargin - c.size;
 
@@ -82,11 +90,15 @@ export class TouchControls {
             this._buttons.push(button);
         }
 
+        inputListener.on(Input.POINTER_DOWN, this._zoneDown, null, this);
+        inputListener.on(Input.POINTER_MOVE, this._zoneMove, null, this);
         inputListener.on(Input.POINTER_UP, this._release, null, this);
         inputListener.on(Input.POINTER_CANCEL, this._release, null, this);
     }
 
     detach(): void {
+        inputListener.off(Input.POINTER_DOWN, this._zoneDown, null);
+        inputListener.off(Input.POINTER_MOVE, this._zoneMove, null);
         inputListener.off(Input.POINTER_UP, this._release, null);
         inputListener.off(Input.POINTER_CANCEL, this._release, null);
     }
@@ -97,6 +109,7 @@ export class TouchControls {
 
     /** Enables or hides the complete touch-control layer, e.g. for menus. */
     setEnabled(enabled: boolean): void {
+        this._enabled = enabled;
         for (const button of this._buttons) button.hit.active = enabled;
         if (!enabled) this.clear();
     }
@@ -108,6 +121,32 @@ export class TouchControls {
             b.glyph.color = cfg.controls.color;
         }
         this._byPointer.clear();
+        this._zonePointers.clear();
+    }
+
+    /** Starts steering from either screen half, except over gas/brake. */
+    private _zoneDown(e: any): void {
+        if (!this._enabled || e.pointer.pointerType !== 'touch') return;
+        if (e.target === this._buttons[Control.GAS].hit
+            || e.target === this._buttons[Control.BRAKE].hit) return;
+
+        const pointerId = e.pointer.id;
+        this._zonePointers.add(pointerId);
+        this._steerFromX(pointerId, e.x);
+    }
+
+    /** Crossing the centre line while held changes steering direction. */
+    private _zoneMove(e: any): void {
+        const pointerId = e.pointer.id;
+        if (!this._zonePointers.has(pointerId)) return;
+        this._steerFromX(pointerId, e.x);
+    }
+
+    private _steerFromX(pointerId: number, x: number): void {
+        const control = x < this._screenWidth * 0.5
+            ? Control.STEER_LEFT
+            : Control.STEER_RIGHT;
+        this._press(this._buttons[control], pointerId);
     }
 
     private _press(button: Button, pointerId: number): void {
@@ -126,6 +165,7 @@ export class TouchControls {
         const button = this._byPointer.get(pointerId);
         if (button) this._letGo(button, pointerId);
         this._byPointer.delete(pointerId);
+        this._zonePointers.delete(pointerId);
     }
 
     private _letGo(button: Button, pointerId: number): void {

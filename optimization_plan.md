@@ -12,8 +12,9 @@ The original plan below is entirely implemented and confirmed in current
 3. **Simplify wheel geometry** — done. `vehicles.testWheels.enabled: true`
    replaces the original FBX wheels with a 20-segment procedural wheel,
    instanced.
-4. **Disable glass transmission** — done. `vehicles.glass.transmission: 0.05`
-   (effectively off).
+4. **Disable glass transmission** — done. Glass now uses transparent
+   `MeshStandardMaterial`; this matters because any `MeshPhysicalMaterial`
+   transmission value above zero enables three.js's full transmission pass.
 5. **Cap active traffic** — done, and further than planned:
    `traffic.maxAlive: 5` (plan asked for 8).
 6. **Lower tree-shadow mask resolution** — done. `treeShadows.maskSize: 512`.

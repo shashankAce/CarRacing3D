@@ -253,13 +253,17 @@ export class VehicleModels {
             });
         }
         if (name === 'Glass') {
-            return new THREE.MeshPhysicalMaterial({
+            // Keep the authored dark transparent-glass look without enabling
+            // MeshPhysicalMaterial's transmission pipeline. In three.js ANY
+            // transmission value above zero triggers a full-resolution,
+            // multisampled scene pre-pass plus mip generation; the previous
+            // 0.05 therefore paid the full cost for a barely visible effect.
+            return new THREE.MeshStandardMaterial({
                 color: source.glass.color,
                 roughness: source.glass.roughness,
                 metalness: source.glass.metalness,
                 transparent: true,
                 opacity: source.glass.opacity,
-                transmission: source.glass.transmission,
             });
         }
         if (name === 'Headlights') {
