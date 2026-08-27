@@ -18,8 +18,10 @@ import { TouchControls } from '../ui/TouchControls';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
+import { CarSelectPanel } from '../ui/CarSelectPanel';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
+import { VehicleModels, type VehicleModelId } from '../assets/VehicleModels';
 
 /**
  * GameScene — Phase 5: player throttle and fuel.
@@ -59,6 +61,11 @@ export class GameScene extends Scene {
     private _traffic: TrafficSystem;
     private _hud: Hud;
     private _gameOver: GameOverPanel;
+    private _carSelect: CarSelectPanel;
+    private _vehicleModels: VehicleModels;
+    private _vehiclesReady = false;
+    private _selectingCar = true;
+    private _discardSelectionTap = false;
     private _perf: PerfHud | null = null;
     private _sun: DirectionalLight3D;
     private _sky: SkyDome;
@@ -114,6 +121,7 @@ export class GameScene extends Scene {
 
         this._state = new GameState();
         this._controls = new TouchControls(this);
+        this._controls.setEnabled(false);
         this._input = new InputController(this._controls);
         this._input.attach();
 
@@ -151,6 +159,7 @@ export class GameScene extends Scene {
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
+        this._traffic.deactivate();
         if (cfg.lighting.bakedShadows.enabled) {
             // Registration only records geometry; the silhouettes are
             // render-target renders, baked in `onRendererReady` above.
@@ -195,7 +204,10 @@ export class GameScene extends Scene {
             }
         }
         this._hud = new Hud(this);
+        this._hud.setVisible(false);
         this._gameOver = new GameOverPanel(this);
+        this._vehicleModels = new VehicleModels();
+        this._carSelect = new CarSelectPanel(this, (id) => this._selectCar(id));
         if (cfg.debug.showPerf) {
             this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
             // Debug bisection hook for the tree mask; see `debugStats`.
@@ -207,6 +219,11 @@ export class GameScene extends Scene {
                 treeMask: this._treeMask?.liveCount ?? 0,
             });
         }
+
+        // Asset loading is intentionally asynchronous: the engine can render
+        // its loading label immediately, while gameplay remains paused until a
+        // player has selected a fully-loaded FBX model.
+        void this._loadVehicleModels();
     }
 
     /**
@@ -299,7 +316,19 @@ export class GameScene extends Scene {
      * nothing in a frame is ever reading last frame's state.
      */
     update(dt: number): void {
+        if (this._selectingCar) {
+            this._camera.update(dt, this._car, 0);
+            this._updateSun();
+            this._sky.update(this._camera.position);
+            this._clouds.update(dt, this._camera.position);
+            return;
+        }
+
         this._input.sample();
+        if (this._discardSelectionTap) {
+            this._input.consumeTap();
+            this._discardSelectionTap = false;
+        }
 
         if (this._state.isRunning) {
             this._state.update(dt, this._input.throttle);
@@ -407,6 +436,57 @@ export class GameScene extends Scene {
         this._syncScatter();
         this._markers.update();
         this._camera.snapTo(this._car);
+    }
+
+    /** Load all static model templates once, then allocate every traffic clone up front. */
+    private async _loadVehicleModels(): Promise<void> {
+        try {
+            await this._vehicleModels.load();
+            this._traffic.attachModels(this._vehicleModels);
+            this._traffic.refreshProjectedGeometry(this._projected);
+            this._projected.rebake();
+            this._attachTrafficMaterials();
+            this._vehiclesReady = true;
+            this._carSelect.show();
+        } catch (error) {
+            console.error('[vehicles] Failed to load the vehicle catalog.', error);
+        }
+    }
+
+    private _selectCar(id: VehicleModelId): void {
+        if (!this._vehiclesReady || !this._selectingCar) return;
+
+        const spec = this._vehicleModels.spec(id);
+        this._car.setVisual(this._vehicleModels.create(id), spec);
+        this._car.refreshProjectedGeometry(this._projected);
+        this._projected.rebake();
+        this._attachPlayerMaterials();
+        this._carSelect.hide();
+        this._selectingCar = false;
+        this._discardSelectionTap = true;
+        this._controls.setEnabled(true);
+        this._hud.setVisible(true);
+        // The selection tap is also seen by InputController's global listener;
+        // consume it so it cannot trigger an accidental restart later.
+        this._restart();
+    }
+
+    private _attachTrafficMaterials(): void {
+        if (!cfg.lighting.projectedShadows.enabled) return;
+        for (const material of this._traffic.receiverMaterials) {
+            this._projected.attach(material, { groundMask: true, maskLift: true });
+        }
+    }
+
+    private _attachPlayerMaterials(): void {
+        if (!cfg.lighting.projectedShadows.enabled) return;
+        for (const material of this._car.receiverMaterials) {
+            this._projected.attach(material, {
+                skip: this._car.projectedHandle,
+                groundMask: true,
+                maskLift: true,
+            });
+        }
     }
 
     onUnload(): void {

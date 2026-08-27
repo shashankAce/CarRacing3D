@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Projected shadow lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #101822; }
+    canvas { display: block; }
+    #panel {
+      position: fixed; z-index: 2; top: 16px; left: 16px; width: min(318px, calc(100vw - 32px));
+      padding: 14px; border: 1px solid rgb(175 207 235 / 22%); border-radius: 12px;
+      background: rgb(7 13 21 / 88%); color: #eaf3ff; box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
+      font-size: 13px;
+    }
+    h1 { margin: 0 0 7px; font-size: 16px; }
+    p { margin: 0 0 12px; color: #b7c8d9; line-height: 1.35; }
+    label { display: grid; gap: 5px; margin-top: 10px; color: #cbd8e5; }
+    select, input { width: 100%; accent-color: #65b9ff; }
+    select { border: 1px solid #466078; border-radius: 6px; background: #192737; color: inherit; padding: 6px; }
+    output { color: #8dd2ff; font-variant-numeric: tabular-nums; }
+    #status { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgb(175 207 235 / 16%); color: #b7c8d9; line-height: 1.35; }
+    #atlas-wrap { position: fixed; z-index: 2; right: 16px; bottom: 16px; width: min(190px, 38vw); }
+    #atlas-label { margin-bottom: 5px; color: #d8e7f6; font-size: 12px; text-shadow: 0 1px 2px #000; }
+    #atlas { display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated; border: 1px solid rgb(202 227 248 / 45%); background: #05080c; }
+    #help { position: fixed; z-index: 2; bottom: 16px; left: 16px; color: #c2d0de; font-size: 12px; text-shadow: 0 1px 2px #000; }
+    @media (max-width: 640px) { #help { display: none; } #atlas-wrap { top: 16px; bottom: auto; } }
+  </style>
+</head>
+
+<body>
+  <section id="panel">
+    <h1>Projected shadow lab</h1>
+    <p>Empty flat receiver: no terrain, tree, or normal shadow-map contribution. The ground shadow is sampled from the same light-frame atlas as the game.</p>
+    <label>Vehicle
+      <select id="vehicle">
+        <option value="SportCar2">SportCar2 (player default)</option>
+        <option value="Sedan1">Sedan1</option>
+        <option value="Car2">Car2</option>
+        <option value="Jeep2">Jeep2</option>
+        <option value="MicroBus4">MicroBus4</option>
+      </select>
+    </label>
+    <label>Capture
+      <select id="capture">
+        <option value="full">Full vehicle — exact game capture</option>
+        <option value="wheels">Wheels only — tire silhouette check</option>
+        <option value="body">Body only — compare against full</option>
+      </select>
+    </label>
+    <label>Sun elevation <output id="elevation-value"></output>
+      <input id="elevation" type="range" min="8" max="85" value="45" step="1" />
+    </label>
+    <label>Sun azimuth <output id="azimuth-value"></output>
+      <input id="azimuth" type="range" min="-180" max="180" value="165" step="1" />
+    </label>
+    <label>Shadow opacity <output id="opacity-value"></output>
+      <input id="opacity" type="range" min="0" max="1" value="0.72" step="0.01" />
+    </label>
+    <div id="status">Loading SportCar2.fbx…</div>
+  </section>
+  <div id="atlas-wrap"><div id="atlas-label">Capture atlas (alpha)</div><canvas id="atlas" width="256" height="256"></canvas></div>
+  <div id="help">Drag to orbit · Scroll to zoom · Right-drag to pan · The orange line points away from the sun</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+    const VEHICLES = {
+      SportCar2: './res/models/vehicles/SportCar2.fbx',
+      Sedan1: './res/models/vehicles/Sedan1.fbx',
+      Car2: './res/models/vehicles/Car2.fbx',
+      Jeep2: './res/models/vehicles/Jeep2.fbx',
+      MicroBus4: './res/models/vehicles/MicroBus4.fbx',
+    };
+    // Mirrors gameConfig's resolved fixed 14:00 sun closely. The controls are
+    // intentionally here for QA; changing them rebuilds the light-frame atlas.
+    // `resolveTimeOfDay()` turns the game's fixed 14:00, latitude 35°,
+    // equinox configuration into approximately elevation 45°, engine azimuth
+    // 165°. These initial controls reproduce that resolved direction.
+    const sunDirection = new THREE.Vector3();
+    const status = document.querySelector('#status');
+    const vehicleSelect = document.querySelector('#vehicle');
+    const captureSelect = document.querySelector('#capture');
+    const elevationInput = document.querySelector('#elevation');
+    const azimuthInput = document.querySelector('#azimuth');
+    const opacityInput = document.querySelector('#opacity');
+    const atlasCanvas = document.querySelector('#atlas');
+    const atlasContext = atlasCanvas.getContext('2d');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x8da9bb);
+    scene.fog = new THREE.Fog(0x8da9bb, 42, 100);
+    const camera = new THREE.PerspectiveCamera(44, innerWidth / innerHeight, 0.01, 250);
+    camera.position.set(8.5, 5.7, 10.5);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    document.body.append(renderer.domElement);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.6, -1.6);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.HemisphereLight(0xd7ecff, 0x26313c, 1.45));
+    const sun = new THREE.DirectionalLight(0xfff2dd, 3.3);
+    scene.add(sun);
+    const vehicleRoot = new THREE.Group();
+    scene.add(vehicleRoot);
+    const directionGuide = new THREE.ArrowHelper(new THREE.Vector3(), new THREE.Vector3(), 5.6, 0xff8b48, 0.22, 0.12);
+    scene.add(directionGuide);
+    const grid = new THREE.GridHelper(34, 34, 0x567185, 0x5a6f72);
+    grid.position.y = 0.006;
+    scene.add(grid);
+
+    const pixelColors = new THREE.TextureLoader().load('./res/models/vehicles/PixelColors.png');
+    pixelColors.colorSpace = THREE.SRGBColorSpace;
+    pixelColors.magFilter = THREE.NearestFilter;
+    pixelColors.minFilter = THREE.NearestMipmapNearestFilter;
+    function vehicleMaterial(name) {
+      if (name === 'PixelColors') return new THREE.MeshStandardMaterial({ map: pixelColors, roughness: 0.22, metalness: 0.05 });
+      if (name === 'Glass') return new THREE.MeshPhysicalMaterial({ color: 0x333333, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.545, transmission: 0.05 });
+      if (name === 'Headlights') return new THREE.MeshStandardMaterial({ color: 0xffd800, emissive: 0xffb000, emissiveIntensity: 3.5, roughness: 0.3 });
+      return new THREE.MeshStandardMaterial({ color: 0x9da9b7, roughness: 0.65 });
+    }
+
+    let model = null;
+    let parts = [];
+    let target = null;
+    let ground = null;
+
+    function lightFrame() {
+      const S = sunDirection.clone().normalize();
+      const horizontal = Math.hypot(S.x, S.z);
+      const R = horizontal > 1e-4 ? new THREE.Vector3(S.z / horizontal, 0, -S.x / horizontal) : new THREE.Vector3(1, 0, 0);
+      const U = new THREE.Vector3().crossVectors(S, R).normalize();
+      return { S, R, U };
+    }
+
+    function isWheel(mesh) {
+      // All bundled FBXs name their wheel meshes FR/FL/BR/BL. Keep the broader
+      // match because third-party exports often spell this Wheel or Tire.
+      return /^(FR|FL|BR|BL)$/i.test(mesh.name) || /wheel|tire/i.test(mesh.name);
+    }
+
+    function selectedParts() {
+      const mode = captureSelect.value;
+      return parts.filter((part) => mode === 'full' || (mode === 'wheels' ? part.wheel : !part.wheel));
+    }
+
+    function boundsFor(geometries, frame) {
+      let rMin = Infinity, rMax = -Infinity, uMin = Infinity, uMax = -Infinity;
+      const corner = new THREE.Vector3();
+      for (const geometry of geometries) {
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        for (let i = 0; i < 8; i++) {
+          corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+          const r = corner.dot(frame.R), u = corner.dot(frame.U);
+          rMin = Math.min(rMin, r); rMax = Math.max(rMax, r);
+          uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
+        }
+      }
+      const padR = (rMax - rMin) * 0.04 + 1e-3, padU = (uMax - uMin) * 0.04 + 1e-3;
+      let depthMin = Infinity, depthMax = -Infinity;
+      for (const geometry of geometries) {
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        for (let i = 0; i < 8; i++) {
+          corner.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+          const depth = -corner.dot(frame.S);
+          depthMin = Math.min(depthMin, depth); depthMax = Math.max(depthMax, depth);
+        }
+      }
+      return {
+        rMin: rMin - padR, rMax: rMax + padR, uMin: uMin - padU, uMax: uMax + padU,
+        depthMin, depthInvSpan: 1 / Math.max(1e-3, depthMax - depthMin),
+      };
+    }
+
+    function disposeTarget() { if (target) { target.dispose(); target = null; } }
+
+    // This is the single-caster version of bakeShadowAtlas in
+    // src/procedural/shadowSilhouette.ts: orthographic camera along S, camera
+    // up = U, MAX alpha coverage and per-pixel nearest light depth, then the
+    // ground samples in those same R/U axes.
+    function rebuildShadow() {
+      if (!model) return;
+      const frame = lightFrame();
+      const active = selectedParts();
+      parts.forEach((part) => { part.mesh.visible = captureSelect.value === 'full' || (captureSelect.value === 'wheels' ? part.wheel : !part.wheel); });
+      disposeTarget();
+      if (!active.length) return;
+      const geometries = active.map((part) => part.geometry);
+      const b = boundsFor(geometries, frame);
+      target = new THREE.WebGLRenderTarget(512, 512, { format: THREE.RGBAFormat, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+      const bakeScene = new THREE.Scene();
+      const captureMaterial = new THREE.ShaderMaterial({
+        uniforms: { uSun: { value: frame.S }, uDepthMin: { value: b.depthMin }, uDepthInvSpan: { value: b.depthInvSpan } },
+        vertexShader: 'uniform vec3 uSun; varying float vDepth; void main(){ vDepth = -dot(position, uSun); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: 'uniform float uDepthMin, uDepthInvSpan; varying float vDepth; void main(){ float nearest = 1.0 - clamp((vDepth-uDepthMin)*uDepthInvSpan, 0.0, 1.0); gl_FragColor = vec4(0.0, nearest, 0.0, 1.0); }',
+        side: THREE.DoubleSide, transparent: true, depthTest: false, depthWrite: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+      });
+      geometries.forEach((geometry) => bakeScene.add(new THREE.Mesh(geometry, captureMaterial)));
+      const centre = new THREE.Vector3().addScaledVector(frame.R, (b.rMin + b.rMax) * 0.5).addScaledVector(frame.U, (b.uMin + b.uMax) * 0.5);
+      const bakeCamera = new THREE.OrthographicCamera((b.rMin - b.rMax) * 0.5, (b.rMax - b.rMin) * 0.5, (b.uMax - b.uMin) * 0.5, (b.uMin - b.uMax) * 0.5, 0.01, 1000);
+      bakeCamera.position.copy(centre).addScaledVector(frame.S, 100);
+      bakeCamera.up.copy(frame.U);
+      bakeCamera.lookAt(centre);
+      bakeCamera.updateProjectionMatrix();
+      const before = renderer.getRenderTarget();
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear(true, true, false);
+      renderer.render(bakeScene, bakeCamera);
+      renderer.setRenderTarget(before);
+      captureMaterial.dispose();
+      makeGroundMaterial(frame, b);
+      drawAtlas();
+      const elevation = THREE.MathUtils.radToDeg(Math.asin(frame.S.y));
+      status.textContent = `${vehicleSelect.value}: ${active.length} mesh part(s) captured · ${parts.filter((p) => p.wheel).length} wheel mesh(es) found · ${elevation.toFixed(0)}° sun`;
+    }
+
+    function makeGroundMaterial(frame, bounds) {
+      if (ground) { scene.remove(ground); ground.geometry.dispose(); ground.material.dispose(); }
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uAtlas: { value: target.texture }, uR: { value: frame.R }, uU: { value: frame.U }, uS: { value: frame.S },
+          uBounds: { value: new THREE.Vector4(bounds.rMin, bounds.uMin, 1 / (bounds.rMax - bounds.rMin), 1 / (bounds.uMax - bounds.uMin)) },
+          uDepth: { value: new THREE.Vector2(bounds.depthMin, bounds.depthInvSpan) },
+          uOpacity: { value: Number(opacityInput.value) },
+        },
+        vertexShader: 'varying vec3 worldPos; void main(){ worldPos = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0); }',
+        fragmentShader: `
+          varying vec3 worldPos; uniform sampler2D uAtlas; uniform vec3 uR, uU, uS; uniform vec4 uBounds; uniform vec2 uDepth; uniform float uOpacity;
+          void main(){
+            float d = -dot(worldPos, uS); vec2 uv = vec2((dot(worldPos,uR)-uBounds.x)*uBounds.z, (dot(worldPos,uU)-uBounds.y)*uBounds.w);
+            vec4 capture = texture2D(uAtlas, uv); float nearDepth = uDepth.x + (1.0-capture.g)*uDepth.y;
+            float a = (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))) && d + 0.015 >= nearDepth) ? capture.a : 0.0;
+            vec3 asphalt = vec3(0.19, 0.22, 0.23); gl_FragColor = vec4(asphalt * (1.0 - a * uOpacity), 1.0);
+          }`,
+      });
+      ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), material);
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -0.012;
+      scene.add(ground);
+      sun.position.copy(frame.S).multiplyScalar(25);
+      directionGuide.position.set(0, 0.03, 0);
+      directionGuide.setDirection(new THREE.Vector3(-frame.S.x, 0, -frame.S.z).normalize());
+    }
+
+    function drawAtlas() {
+      const pixels = new Uint8Array(512 * 512 * 4);
+      renderer.readRenderTargetPixels(target, 0, 0, 512, 512, pixels);
+      const image = atlasContext.createImageData(256, 256);
+      for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+        const source = ((511 - y * 2) * 512 + x * 2) * 4;
+        const dest = (y * 256 + x) * 4, a = pixels[source + 3];
+        image.data[dest] = image.data[dest + 1] = image.data[dest + 2] = a; image.data[dest + 3] = 255;
+      }
+      atlasContext.putImageData(image, 0, 0);
+    }
+
+    function updateSunFromControls() {
+      const elevation = THREE.MathUtils.degToRad(Number(elevationInput.value));
+      const azimuth = THREE.MathUtils.degToRad(Number(azimuthInput.value));
+      sunDirection.set(Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation));
+      document.querySelector('#elevation-value').value = `${elevationInput.value}°`;
+      document.querySelector('#azimuth-value').value = `${azimuthInput.value}°`;
+      rebuildShadow();
+    }
+
+    async function loadVehicle() {
+      status.textContent = `Loading ${vehicleSelect.value}.fbx…`;
+      if (model) { vehicleRoot.remove(model); model = null; parts = []; }
+      new FBXLoader().load(VEHICLES[vehicleSelect.value], (loaded) => {
+        loaded.traverse((mesh) => {
+          if (!mesh.isMesh) return;
+          const wasArray = Array.isArray(mesh.material), source = wasArray ? mesh.material : [mesh.material];
+          const converted = source.map((material) => vehicleMaterial(material?.name));
+          mesh.material = wasArray ? converted : converted[0];
+        });
+        loaded.rotation.y = Math.PI;
+        loaded.scale.setScalar(0.007);
+        loaded.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(loaded), center = box.getCenter(new THREE.Vector3());
+        loaded.position.set(-center.x, -box.min.y, -center.z);
+        loaded.updateMatrixWorld(true);
+        parts = [];
+        loaded.traverse((mesh) => {
+          if (!mesh.isMesh) return;
+          // Same operation as VehicleModels: capture each real FBX mesh in the
+          // normalized vehicle group's local coordinates.
+          parts.push({ mesh, wheel: isWheel(mesh), geometry: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld) });
+        });
+        model = loaded; vehicleRoot.add(model);
+        controls.target.set(0, 0.65, -1.5); controls.update();
+        rebuildShadow();
+      }, undefined, (error) => { console.error(error); status.textContent = `Could not load ${vehicleSelect.value}.fbx — see console.`; });
+    }
+
+    vehicleSelect.addEventListener('change', loadVehicle);
+    captureSelect.addEventListener('change', rebuildShadow);
+    elevationInput.addEventListener('input', updateSunFromControls);
+    azimuthInput.addEventListener('input', updateSunFromControls);
+    opacityInput.addEventListener('input', () => { if (ground) ground.material.uniforms.uOpacity.value = Number(opacityInput.value); document.querySelector('#opacity-value').value = opacityInput.value; });
+    document.querySelector('#opacity-value').value = opacityInput.value;
+    updateSunFromControls();
+    loadVehicle();
+    addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+    renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+  </script>
+</body>
+</html>

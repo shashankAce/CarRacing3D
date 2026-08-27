@@ -499,10 +499,10 @@ export const gameConfig = {
          * speed ramp, and it's what makes late-run traffic genuinely dangerous.
          */
         types: [
-            { name: 'car', width: 1.9, height: 0.95, length: 4.2, speedMin: 17, speedMax: 21, weight: 5, color: 0x3f7fbf },
-            { name: 'coupe', width: 1.8, height: 0.85, length: 3.9, speedMin: 19, speedMax: 26, weight: 3, color: 0xd8b23a },
-            { name: 'van', width: 2.1, height: 1.7, length: 5.4, speedMin: 14, speedMax: 18, weight: 3, color: 0xe3e0d6 },
-            { name: 'bus', width: 2.4, height: 2.5, length: 9.0, speedMin: 12, speedMax: 15, weight: 2, color: 0xc25b3a },
+            { name: 'sedan', model: 'sedan', width: 2.12, height: 1.30, length: 4.60, speedMin: 17, speedMax: 21, weight: 5 },
+            { name: 'coupe', model: 'car', width: 1.92, height: 1.34, length: 4.20, speedMin: 19, speedMax: 26, weight: 3 },
+            { name: 'jeep', model: 'jeep', width: 2.26, height: 1.80, length: 4.23, speedMin: 14, speedMax: 18, weight: 3 },
+            { name: 'microbus', model: 'microbus', width: 2.16, height: 2.08, length: 4.86, speedMin: 12, speedMax: 15, weight: 2 },
         ],
     },
 
@@ -762,7 +762,49 @@ export const gameConfig = {
         hintText: '◀ ▶ STEER    ▲ GAS    ▼ BRAKE',
     },
 
-    /** Player car dimensions — placeholder boxes until FBX models land. */
+    /**
+     * Runtime vehicle catalog. All FBX assets use the same three Unity material
+     * names; `VehicleModels` maps them to the settings below. The authored
+     * meshes are hundreds of FBX units wide, hence the shared 0.007 scale.
+     */
+    vehicles: {
+        paletteTexture: 'res/models/vehicles/PixelColors.png',
+        /** The car pre-highlighted in the selection screen. */
+        playerDefault: 'sport',
+        models: [
+            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', scale: 0.007, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21 },
+            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', scale: 0.007, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60 },
+            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', scale: 0.007, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20 },
+            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', scale: 0.007, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23 },
+            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', scale: 0.007, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86 },
+        ],
+        materials: {
+            pixelColors: { roughness: 0.22, metalness: 0.05 },
+            glass: { color: 0x333333, roughness: 0.12, metalness: 0.1, opacity: 0.545, transmission: 0.05 },
+            headlights: { color: 0xffd800, emissive: 0xffb000, emissiveIntensity: 3.5, roughness: 0.3 },
+        },
+    },
+
+    /** The selection UI is content-driven alongside the vehicles themselves. */
+    carSelect: {
+        title: 'CHOOSE YOUR CAR',
+        loadingText: 'LOADING CARS…',
+        hint: 'TAP A CAR TO RACE',
+        titleY: 1020,
+        hintY: 920,
+        firstChoiceY: 810,
+        choiceGap: 112,
+        choiceWidth: 420,
+        choiceHeight: 82,
+        titleFontSize: 48,
+        choiceFontSize: 34,
+        hintFontSize: 24,
+        titleColor: '#ffffff',
+        choiceColor: '#9fe8ff',
+        hintColor: '#c9d9e2',
+    },
+
+    /** Player car dimensions and handling. FBX footprint comes from `vehicles.models`. */
     car: {
         width: 2.0,
         height: 0.9,

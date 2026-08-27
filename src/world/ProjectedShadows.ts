@@ -51,8 +51,11 @@ import {
  *
  *  - A shadow would reach infinitely far down-light. `d` fades it out over
  *    `fadeNear`..`fadeFar`.
- *  - A shadow would fall on surfaces BETWEEN the caster and the sun. `d <= 0`
- *    rejects those outright.
+ *  - A shadow would fall on surfaces BETWEEN the caster and the sun. The
+ *    capture's green channel stores the nearest caster surface for each atlas
+ *    pixel, so the receiver rejects only points before *that* surface. This is
+ *    crucial at a vehicle's front wheel: its shadow can begin sunward of the
+ *    vehicle centre and a centre-based `d <= 0` cut would chop it off.
  *
  * What genuinely cannot be recovered is a caster shadowing ITSELF, since that is
  * precisely the case the depth test exists to resolve. `attach`'s `skip` option
@@ -109,6 +112,7 @@ interface PendingCaster {
 export class ProjectedShadows {
     private _casterGeometries: THREE.BufferGeometry[][] = [];
     private _atlas: ShadowAtlas | null = null;
+    private _renderer: THREE.WebGLRenderer | null = null;
     private _frame = lightFrame(cfg.lighting.sunDirection);
 
     /** Shared uniform objects. Every patched material references THESE, so one write updates all of them. */
@@ -123,9 +127,9 @@ export class ProjectedShadows {
 
     /**
      * Y a parked slot is sent to. Chosen so `d = -dot(rel, S)` comes out hugely
-     * NEGATIVE and the shader's `d <= 0` test rejects the slot before it can
-     * reach a texture fetch — which is why unused slots cost almost nothing and
-     * why the loop needs no dynamic bound (GLSL ES 1.0 will not give us one).
+     * far outside its light-frame bounds, so its UV test rejects it before a
+     * texture fetch. The loop still needs no dynamic bound (GLSL ES 1.0 will
+     * not give us one).
      */
     private static readonly PARKED_Y = -1e6;
 
@@ -149,6 +153,9 @@ export class ProjectedShadows {
             uProjShadowSun: { value: new THREE.Vector3(S.x, S.y, S.z) },
             uProjShadowUy: { value: this._frame.U.y },
             uProjShadowGrid: { value: new THREE.Vector4(1, 1, 1, 1) },
+            // x = atlas-wide depth minimum; y = reciprocal depth span. Atlas
+            // green uses the inverted encoding documented in ShadowAtlas.
+            uProjShadowDepth: { value: new THREE.Vector2(0, 1) },
             uProjShadowFade: { value: new THREE.Vector2(ps.fadeNear, ps.fadeFar) },
             uProjShadowOpacity: { value: ps.opacity },
             // The tree mask. Declared unconditionally — a material that does not
@@ -172,6 +179,12 @@ export class ProjectedShadows {
     register(geometry: THREE.BufferGeometry | THREE.BufferGeometry[]): number {
         this._casterGeometries.push(Array.isArray(geometry) ? geometry : [geometry]);
         return this._casterGeometries.length - 1;
+    }
+
+    /** Replaces a caster's source geometry; call `rebake()` after a batch of changes. */
+    setCasterGeometry(handle: number, geometry: THREE.BufferGeometry | THREE.BufferGeometry[]): void {
+        if (handle < 0 || handle >= this._casterGeometries.length) return;
+        this._casterGeometries[handle] = Array.isArray(geometry) ? geometry : [geometry];
     }
 
     /**
@@ -207,12 +220,21 @@ export class ProjectedShadows {
     /** Bakes the atlas. Needs a renderer, so it runs once the renderer exists. */
     bake(renderer: THREE.WebGLRenderer): void {
         if (this._casterGeometries.length === 0) return;
+        this._renderer = renderer;
         const ps = cfg.lighting.projectedShadows;
+        this._atlas?.target.dispose();
         this._atlas = bakeShadowAtlas(renderer, this._casterGeometries, this._frame, ps.textureSize);
         this._uniforms.uProjShadowAtlas.value = this._atlas.texture;
         const { cols, rows } = this._atlas;
         (this._uniforms.uProjShadowGrid.value as THREE.Vector4)
             .set(cols, rows, 1 / cols, 1 / rows);
+        (this._uniforms.uProjShadowDepth.value as THREE.Vector2)
+            .set(this._atlas.depthMin, this._atlas.depthInvSpan);
+    }
+
+    /** Rebakes only when a renderer is available; safe during asynchronous model loading. */
+    rebake(): void {
+        if (this._renderer) this.bake(this._renderer);
     }
 
     /**
@@ -281,6 +303,7 @@ uniform vec4 uProjShadowBasis[${count}];
 uniform vec3 uProjShadowSun;
 uniform float uProjShadowUy;
 uniform vec4 uProjShadowGrid;
+uniform vec2 uProjShadowDepth;
 uniform vec2 uProjShadowFade;
 uniform float uProjShadowOpacity;
 ${groundMask ? `
@@ -321,12 +344,10 @@ float projShadowFactor() {
         ${skip >= 0 ? `if (i == ${skip}) continue;` : ''}
         vec4 origin = uProjShadowOrigin[i];
         vec3 rel = vProjShadowWorld - origin.xyz;
-        // Metres down-light of the caster. Negative means the fragment sits
-        // between the caster and the sun, so it cannot be in this shadow — and
-        // it is also how a parked slot is rejected before any texture fetch.
+        // Metres down-light of the caster origin. It is compared with the
+        // per-pixel capture depth below; the origin alone is not a valid near
+        // boundary for an offset wheel or any other asymmetric mesh part.
         float d = -dot(rel, uProjShadowSun);
-        if (d <= 0.0) continue;
-
         // R and U pre-rotated by the caster's yaw on the CPU, so the footprint
         // turns with the vehicle. Both stay perpendicular to the light in the
         // caster's own frame; R is horizontal so only x/z vary, and U's y
@@ -340,7 +361,13 @@ float projShadowFactor() {
         if (cellUv.x < 0.0 || cellUv.x > 1.0 || cellUv.y < 0.0 || cellUv.y > 1.0) continue;
 
         vec2 cell = vec2(mod(origin.w, uProjShadowGrid.x), floor(origin.w * uProjShadowGrid.z));
-        float a = texture2D(uProjShadowAtlas, (cell + cellUv) * uProjShadowGrid.zw).a;
+        vec4 atlasSample = texture2D(uProjShadowAtlas, (cell + cellUv) * uProjShadowGrid.zw);
+        // Green is the nearest captured surface along this exact light ray.
+        // Unlike a centre-depth test it does not assume the caster origin is the
+        // near edge, so a wheel ahead of the origin is not clipped away.
+        float nearDepth = uProjShadowDepth.x + (1.0 - atlasSample.g) * uProjShadowDepth.y;
+        if (d + 0.015 < nearDepth) continue;
+        float a = atlasSample.a;
         a *= 1.0 - smoothstep(uProjShadowFade.x, uProjShadowFade.y, d);
         occ = max(occ, a);
     }
@@ -425,8 +452,8 @@ void main() {`)
                 -U.x * p.sin + U.z * p.cos,
             );
         }
-        // Park the rest below the world, where the shader's `d <= 0` test drops
-        // them before any work.
+        // Park the rest below the world, where their enormous light-frame U
+        // coordinate fails the bounds test before any texture fetch.
         for (let i = live; i < this._slots; i++) {
             this._origin[i].set(0, ProjectedShadows.PARKED_Y, 0, 0);
         }

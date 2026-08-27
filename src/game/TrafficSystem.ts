@@ -5,6 +5,7 @@ import { roadCenterX, roadHeadingAt } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
 import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
+import type { VehicleModels } from '../assets/VehicleModels';
 
 /** What a vehicle is doing about the one in front. */
 const enum Manoeuvre {
@@ -16,7 +17,12 @@ const enum Manoeuvre {
 /** One pooled vehicle. Never created or destroyed after startup. */
 export interface TrafficVehicle {
     group: Group3D;
+    /** Hidden collision/shadow proxy retained for the existing pooled logic. */
     body: THREE.Mesh;
+    /** The static FBX visual assigned to this pool slot's configured type. */
+    model: THREE.Object3D | null;
+    /** Fixed per pool slot, so spawning never allocates a new model. */
+    modelType: number;
     indicator: THREE.Mesh;
     active: boolean;
     /** Index into `cfg.traffic.types`. */
@@ -72,10 +78,10 @@ export class TrafficSystem {
 
     private _pool: TrafficVehicle[] = [];
     private _shadowHandles: number[] = [];
-    private _materials: THREE.MeshStandardMaterial[] = [];
+    private _materials: THREE.Material[] = [];
+    private _modelShadowGeometries: THREE.BufferGeometry[][] = [];
     /** Player travel at which the next spawn is attempted. */
     private _nextSpawnAt = 0;
-    private _totalWeight = 0;
     /** Drives indicator blinking; shared so every signal blinks in phase. */
     private _blinkClock = 0;
     /** Scratch objects shared by the sequential traffic placement pass. */
@@ -95,18 +101,18 @@ export class TrafficSystem {
         const bodyGeometry = new THREE.BoxGeometry(1, 1, 1);
         const indicatorGeometry = new THREE.BoxGeometry(1, 1, 1);
         const indicatorMaterial = new THREE.MeshBasicMaterial({ color: t.overtake.indicatorColor });
-        this._materials = t.types.map(type => new THREE.MeshStandardMaterial({
-            color: type.color, roughness: 0.5, metalness: 0.15,
-        }));
-        for (const type of t.types) this._totalWeight += type.weight;
+        const slotTypes: number[] = [];
+        t.types.forEach((type, index) => {
+            for (let count = 0; count < type.weight; count++) slotTypes.push(index);
+        });
 
         for (let i = 0; i < t.maxAlive; i++) {
             const node = new Node();
             const group = node.addComponent(Group3D);
             scene.addChild(node);
 
-            const body = new THREE.Mesh(bodyGeometry, this._materials[0]);
-            body.castShadow = cfg.lighting.shadows.enabled;
+            const body = new THREE.Mesh(bodyGeometry, new THREE.MeshBasicMaterial({ visible: false }));
+            body.visible = false;
 
             // Unlit, so it reads as a lamp rather than a painted panel — and it
             // stays visible on the shadowed side of a vehicle.
@@ -117,7 +123,7 @@ export class TrafficSystem {
             group.object3D.visible = false;
 
             this._pool.push({
-                group, body, indicator, active: false, type: 0,
+                group, body, indicator, model: null, modelType: slotTypes[i % slotTypes.length], active: false, type: 0,
                 laneF: 0, targetLane: 0, worldZ: 0,
                 desiredSpeed: 0, speed: 0,
                 manoeuvre: Manoeuvre.CRUISING, signalTimer: 0, signalDir: 0,
@@ -126,6 +132,41 @@ export class TrafficSystem {
             });
         }
         this.reset();
+    }
+
+    /** Hides the pre-seeded pool while the car-selection screen is open. */
+    deactivate(): void {
+        for (const v of this._pool) {
+            v.active = false;
+            v.group.object3D.visible = false;
+            v.indicator.visible = false;
+        }
+    }
+
+    /**
+     * Adds one configured FBX clone to each pool slot. The slot's model type is
+     * fixed up front, so traffic keeps the no-allocation spawn/recycle contract.
+     */
+    attachModels(models: VehicleModels): void {
+        this._materials = [];
+        this._modelShadowGeometries = cfg.traffic.types.map(() => [] as THREE.BufferGeometry[]);
+        for (const v of this._pool) {
+            if (v.model) v.group.object3D.remove(v.model);
+            const spec = cfg.traffic.types[v.modelType];
+            const visual = models.create(spec.model);
+            // VehicleModels rests a visual on local y=0. Traffic placement uses
+            // a centre-origin group for its existing collision/shadow proxies.
+            visual.root.position.y -= spec.height / 2;
+            // The group is centre-origin, so capture the same shifted local
+            // geometry the renderer sees. Only one copy per type is needed.
+            if (this._modelShadowGeometries[v.modelType].length === 0) {
+                this._modelShadowGeometries[v.modelType] = visual.shadowGeometries;
+                for (const geometry of visual.shadowGeometries) geometry.translate(0, -spec.height / 2, 0);
+            }
+            v.model = visual.root;
+            v.group.object3D.add(v.model);
+            this._materials.push(...visual.materials);
+        }
     }
 
     /** Lateral centre of a lane, as an offset from the road centre. Linear in `lane`, so fractional lanes interpolate. */
@@ -365,6 +406,14 @@ export class TrafficSystem {
             shadows.register(new THREE.BoxGeometry(type.width, type.height, type.length)));
     }
 
+    /** Replaces the registered box proxies with one normalized FBX capture per type. */
+    refreshProjectedGeometry(shadows: ProjectedShadows): void {
+        for (let type = 0; type < this._projectedHandles.length; type++) {
+            const geometries = this._modelShadowGeometries[type];
+            if (geometries.length > 0) shadows.setCasterGeometry(this._projectedHandles[type], geometries);
+        }
+    }
+
     /**
      * Submits every live vehicle. Priority is the squared distance from the
      * camera's end of the world, so when there are more vehicles than slots the
@@ -528,7 +577,7 @@ export class TrafficSystem {
         if (clearNearby - 1 < t.minFreeLanes) return false;
 
         const lane = free[Math.floor(Math.random() * free.length)];
-        const type = this._pickType();
+        const type = slot.modelType;
         const spec = t.types[type];
 
         slot.active = true;
@@ -547,9 +596,6 @@ export class TrafficSystem {
         slot.halfLength = spec.length / 2;
         slot.height = spec.height;
 
-        slot.body.material = this._materials[type];
-        slot.body.scale.set(spec.width, spec.height, spec.length);
-
         // Indicator on the rear face, offset to whichever side is being signalled
         // — repositioned when a manoeuvre starts, so one mesh covers both sides.
         const s = t.overtake.indicatorSize;
@@ -561,14 +607,4 @@ export class TrafficSystem {
         return true;
     }
 
-    /** Weighted pick over the type table. */
-    private _pickType(): number {
-        let r = Math.random() * this._totalWeight;
-        const types = cfg.traffic.types;
-        for (let i = 0; i < types.length; i++) {
-            r -= types[i].weight;
-            if (r <= 0) return i;
-        }
-        return types.length - 1;
-    }
 }

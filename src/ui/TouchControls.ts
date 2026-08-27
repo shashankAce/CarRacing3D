@@ -95,6 +95,12 @@ export class TouchControls {
         return this._buttons[control].held.size > 0;
     }
 
+    /** Enables or hides the complete touch-control layer, e.g. for menus. */
+    setEnabled(enabled: boolean): void {
+        for (const button of this._buttons) button.hit.active = enabled;
+        if (!enabled) this.clear();
+    }
+
     /** Drops every hold — used on restart so a finger still down doesn't act. */
     clear(): void {
         for (const b of this._buttons) {

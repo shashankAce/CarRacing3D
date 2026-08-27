@@ -29,6 +29,7 @@ export class Hud {
     private _lastKph = -1;
     private _lastCuts = -1;
     private _lastFuelCells = -1;
+    private _visible = true;
 
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
@@ -63,6 +64,7 @@ export class Hud {
     }
 
     update(state: GameState, hasSteered: boolean, cuts: number): void {
+        if (!this._visible) return;
         const metres = Math.floor(state.distance);
         if (metres !== this._lastMetres) {
             this._lastMetres = metres;
@@ -93,5 +95,23 @@ export class Hud {
 
         // The hint has done its job the moment the player steers once.
         if (hasSteered && this._hint.text !== '') this._hint.text = '';
+    }
+
+    /** Hides gameplay readouts while the car-selection screen owns the UI. */
+    setVisible(visible: boolean): void {
+        this._visible = visible;
+        if (!visible) {
+            this._distance.text = '';
+            this._speed.text = '';
+            this._hint.text = '';
+            this._cuts.text = '';
+            this._fuel.text = '';
+            return;
+        }
+        this._lastMetres = -1;
+        this._lastKph = -1;
+        this._lastCuts = -1;
+        this._lastFuelCells = -1;
+        this._hint.text = cfg.hud.hintText;
     }
 }

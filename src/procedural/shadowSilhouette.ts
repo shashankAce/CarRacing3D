@@ -133,6 +133,19 @@ export interface ShadowAtlas {
      * and two misaligned shadows read worse than one missing one.
      */
     heightScale: number;
+    /**
+     * The green channel encodes the nearest caster surface along the light ray.
+     * Reconstruct with `depthMin + (1 - green) * depthInvSpan`.
+     *
+     * `depth` means `-dot(position, S)`: larger is farther down-light. Storing
+     * the nearest (smallest) value lets receivers reject the part of an atlas
+     * footprint that is still BETWEEN that particular surface and the sun.
+     * A centre-origin `d > 0` test cannot do this: a front wheel may itself sit
+     * slightly sunward of the vehicle origin, while its perfectly valid shadow
+     * starts there.
+     */
+    depthMin: number;
+    depthInvSpan: number;
     /** Kept so the bake can be read back and verified; nothing else needs it. */
     target: THREE.WebGLRenderTarget;
     cols: number;
@@ -175,15 +188,34 @@ export function bakeShadowAtlas(
     });
 
     // Tallest caster in the set, which the red channel is normalised against.
+    // Also find the light-axis extent. Green stores the *nearest* geometry
+    // depth in each pixel; MAX blending can retain a minimum by encoding it
+    // upside-down (near = 1, far = 0).
     let heightScale = 1e-3;
+    let depthMin = Infinity, depthMax = -Infinity;
+    const corner = new THREE.Vector3();
     for (const geometries of casters) {
         for (const geometry of geometries) {
             geometry.computeBoundingBox();
-            heightScale = Math.max(heightScale, geometry.boundingBox!.max.y);
+            const box = geometry.boundingBox!;
+            heightScale = Math.max(heightScale, box.max.y);
+            for (let i = 0; i < 8; i++) {
+                corner.set(
+                    i & 1 ? box.max.x : box.min.x,
+                    i & 2 ? box.max.y : box.min.y,
+                    i & 4 ? box.max.z : box.min.z,
+                );
+                const depth = -corner.dot(frame.S);
+                depthMin = Math.min(depthMin, depth);
+                depthMax = Math.max(depthMax, depth);
+            }
         }
     }
+    if (!Number.isFinite(depthMin)) { depthMin = 0; depthMax = 1; }
+    const depthInvSpan = 1 / Math.max(1e-3, depthMax - depthMin);
 
-    // Alpha = coverage, red = the highest caster geometry along this ray.
+    // Alpha = coverage, red = the highest caster geometry along this ray,
+    // green = the nearest surface along that ray.
     //
     // MAX blending with no depth test is what makes the red channel mean that:
     // every fragment of every part writes its own height and the largest
@@ -194,21 +226,33 @@ export function bakeShadowAtlas(
     // its silhouette. It cannot change the result for a closed mesh, where the
     // front hull is the silhouette by definition.
     const material = new THREE.ShaderMaterial({
-        uniforms: { uHeightScale: { value: heightScale } },
+        uniforms: {
+            uHeightScale: { value: heightScale },
+            uDepthMin: { value: depthMin },
+            uDepthInvSpan: { value: depthInvSpan },
+            uShadowSun: { value: frame.S },
+        },
         vertexShader: `
+            uniform vec3 uShadowSun;
             varying float vHeight;
+            varying float vDepth;
             void main() {
                 // Local y: caster geometry is authored with its base at 0, so
                 // this is height above the caster's own footing.
                 vHeight = position.y;
+                vDepth = -dot(position, uShadowSun);
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `,
         fragmentShader: `
             uniform float uHeightScale;
+            uniform float uDepthMin;
+            uniform float uDepthInvSpan;
             varying float vHeight;
+            varying float vDepth;
             void main() {
-                gl_FragColor = vec4(clamp(vHeight / uHeightScale, 0.0, 1.0), 0.0, 0.0, 1.0);
+                float nearDepth = 1.0 - clamp((vDepth - uDepthMin) * uDepthInvSpan, 0.0, 1.0);
+                gl_FragColor = vec4(clamp(vHeight / uHeightScale, 0.0, 1.0), nearDepth, 0.0, 1.0);
             }
         `,
         side: THREE.DoubleSide,
@@ -292,7 +336,7 @@ export function bakeShadowAtlas(
     renderer.setScissor(prevScissor);
     material.dispose();
 
-    return { texture: target.texture, target, cols, rows, cells, heightScale };
+    return { texture: target.texture, target, cols, rows, cells, heightScale, depthMin, depthInvSpan };
 }
 
 /**

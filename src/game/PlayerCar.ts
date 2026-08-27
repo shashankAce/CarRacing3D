@@ -5,6 +5,7 @@ import { roadCenterX } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
 import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
+import type { VehicleVisual } from '../assets/VehicleModels';
 
 /**
  * PlayerCar — placeholder box car, its steering, and how it sits on the ground.
@@ -37,7 +38,11 @@ import type { ProjectedShadows } from '../world/ProjectedShadows';
 export class PlayerCar {
 
     private _group: Group3D;
-    private _wheels: THREE.Mesh[] = [];
+    private _visual: THREE.Object3D | null = null;
+    private _shadowGeometries: THREE.BufferGeometry[] = [];
+    private _width = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.width ?? cfg.car.width;
+    private _height = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.height ?? cfg.car.height;
+    private _length = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.length ?? cfg.car.length;
     /** Absolute lateral position of the rear steering pivot, metres. */
     private _x = 0;
     /** Damped steering yaw; negative points right because local forward is -Z. */
@@ -76,11 +81,11 @@ export class PlayerCar {
      */
     registerShadow(decals: ShadowDecals): void {
         const c = cfg.car;
-        const body = new THREE.BoxGeometry(c.width, c.height, c.length);
-        body.translate(0, c.rideHeight + c.height / 2, 0);
+        const body = new THREE.BoxGeometry(this._width, this._height, this._length);
+        body.translate(0, this._height / 2, 0);
         const cabin = new THREE.BoxGeometry(
-            c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor);
-        cabin.translate(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
+            this._width * c.cabinWidthFactor, c.cabinHeight, this._length * c.cabinLengthFactor);
+        cabin.translate(0, this._height + c.cabinHeight / 2, this._length * 0.1);
         // Two parts, not merged — the baker renders both into one silhouette.
         this._shadowHandle = decals.register([body, cabin]);
     }
@@ -114,11 +119,11 @@ export class PlayerCar {
      */
     registerProjected(shadows: ProjectedShadows): void {
         const c = cfg.car;
-        const body = new THREE.BoxGeometry(c.width, c.height, c.length);
-        body.translate(0, c.rideHeight + c.height / 2, 0);
+        const body = new THREE.BoxGeometry(this._width, this._height, this._length);
+        body.translate(0, this._height / 2, 0);
         const cabin = new THREE.BoxGeometry(
-            c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor);
-        cabin.translate(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
+            this._width * c.cabinWidthFactor, c.cabinHeight, this._length * c.cabinLengthFactor);
+        cabin.translate(0, this._height + c.cabinHeight / 2, this._length * 0.1);
         this._projectedHandle = shadows.register([body, cabin]);
     }
 
@@ -144,84 +149,34 @@ export class PlayerCar {
         );
     }
 
-    get halfWidth(): number { return cfg.car.width / 2; }
-    get halfLength(): number { return cfg.car.length / 2; }
+    get halfWidth(): number { return this._width / 2; }
+    get halfLength(): number { return this._length / 2; }
 
     constructor(scene: Scene) {
         const node = new Node();
         this._group = node.addComponent(Group3D);
         scene.addChild(node);
 
-        const c = cfg.car;
-        const bodyMaterial = new THREE.MeshStandardMaterial({
-            color: cfg.colors.car.body, roughness: 0.5, metalness: 0.15,
-        });
-        const cabinMaterial = new THREE.MeshStandardMaterial({
-            color: cfg.colors.car.cabin, roughness: 0.35, metalness: 0.2,
-        });
-        this._materials.push(bodyMaterial, cabinMaterial);
-        const body = new THREE.Mesh(
-            new THREE.BoxGeometry(c.width, c.height, c.length),
-            bodyMaterial,
-        );
-        body.position.y = c.rideHeight + c.height / 2;
-
-        const cabin = new THREE.Mesh(
-            new THREE.BoxGeometry(c.width * c.cabinWidthFactor, c.cabinHeight, c.length * c.cabinLengthFactor),
-            cabinMaterial,
-        );
-        // Biased toward the rear (+Z) so the silhouette reads as facing -Z.
-        cabin.position.set(0, c.rideHeight + c.height + c.cabinHeight / 2, c.length * 0.1);
-
-        body.castShadow = cfg.lighting.shadows.enabled;
-        cabin.castShadow = cfg.lighting.shadows.enabled;
-        this._group.object3D.add(body, cabin);
-        this._buildWheels();
         this.reset();
     }
 
-    /**
-     * Four tyres, sharing one geometry and one material.
-     *
-     * The cylinder's axis is baked onto X at build time (`rotateZ`) rather than
-     * by setting `mesh.rotation.z`, so the mesh's own `rotation.x` is free to be
-     * the wheel's spin. Rotating the mesh to orient it instead would make the
-     * spin axis depend on Euler order, which is a mess to reason about.
-     *
-     * OPTIMISATION FLAGGED, NOT DONE (deferred by the project owner):
-     * from a chase camera the tyres are barely visible — the body occludes most
-     * of them and the rear pair almost entirely. So all of this is a candidate
-     * for faking or dropping:
-     *   - 4 meshes x 12 radial segments each, per vehicle;
-     *   - four separate draw calls, since they don't share the body's material;
-     *   - a per-frame spin write per wheel.
-     * Cheaper options, roughly in order: merge the four tyres into ONE geometry
-     * (spin then has to go, or become a scrolling texture); drop the rear pair;
-     * or replace all four with a single dark quad under the car. Traffic must
-     * NOT copy this pattern as-is — a dozen vehicles would be ~72 draw calls.
-     */
-    private _buildWheels(): void {
-        const c = cfg.car, w = c.wheel;
-        const geometry = new THREE.CylinderGeometry(w.radius, w.radius, w.width, 12);
-        geometry.rotateZ(Math.PI / 2);
-        const material = new THREE.MeshStandardMaterial({ color: w.color, roughness: 0.85 });
-        this._materials.push(material);
+    /** Replaces the invisible startup placeholder with the selected FBX clone. */
+    setVisual(visual: VehicleVisual, dimensions: { width: number; height: number; length: number }): void {
+        if (this._visual) this._group.object3D.remove(this._visual);
+        this._visual = visual.root;
+        this._width = dimensions.width;
+        this._height = dimensions.height;
+        this._length = dimensions.length;
+        this._materials = visual.materials;
+        this._shadowGeometries = visual.shadowGeometries;
+        this._group.object3D.add(this._visual);
+        this.reset();
+    }
 
-        const x = c.width / 2 - w.width * (0.5 - w.outboard);
-        const z = this.halfLength * w.axleOffset;
-        for (const sx of [-1, 1]) {
-            for (const sz of [-1, 1]) {
-                const wheel = new THREE.Mesh(geometry, material);
-                // Wheels deliberately don't cast — they're inside the body's own
-                // shadow from any sun angle that isn't near-horizontal, so it's
-                // four more casters for nothing.
-                wheel.castShadow = false;
-                // Axle at exactly `radius` puts the tread on the ground plane,
-                // which is the plane the group's origin sits on.
-                wheel.position.set(sx * x, w.radius, sz * z);
-                this._group.object3D.add(wheel);
-                this._wheels.push(wheel);
-            }
+    /** Switches the already-registered shadow slot to the selected FBX mesh. */
+    refreshProjectedGeometry(shadows: ProjectedShadows): void {
+        if (this._shadowGeometries.length > 0) {
+            shadows.setCasterGeometry(this._projectedHandle, this._shadowGeometries);
         }
     }
 
@@ -306,7 +261,7 @@ export class PlayerCar {
         // locations after yaw. Axis-aligned samples were the reason the body
         // stopped matching the road whenever it was turned on a slope.
         const wheel = cfg.car.wheel;
-        const wheelX = cfg.car.width / 2 - wheel.width * (0.5 - wheel.outboard);
+        const wheelX = this.halfWidth * 0.84;
         const axleZ = this.halfLength * wheel.axleOffset;
         const frontLeft = this._heightAtLocal(-wheelX, -axleZ, bodyX, bodyWorldZ);
         const frontRight = this._heightAtLocal(wheelX, -axleZ, bodyX, bodyWorldZ);
@@ -361,10 +316,6 @@ export class PlayerCar {
             'YXZ',
         );
 
-        // Roll the tyres. A wheel carrying the car forward (-Z) has its top
-        // moving -Z too, which is a NEGATIVE rotation about +X.
-        const spin = (speed / cfg.car.wheel.radius) * dt;
-        for (const wheel of this._wheels) wheel.rotation.x -= spin;
     }
 
     reset(): void {
@@ -376,6 +327,5 @@ export class PlayerCar {
         this._againstEdge = false;
         this._group.object3D.position.set(this._x, this._y, 0);
         this._group.object3D.rotation.set(0, 0, 0, 'YXZ');
-        for (const wheel of this._wheels) wheel.rotation.x = 0;
     }
 }

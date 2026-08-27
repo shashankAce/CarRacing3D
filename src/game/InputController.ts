@@ -73,6 +73,7 @@ export class InputController {
         this._controls.clear();
         this.axis = 0;
         this.throttle = 0;
+        this._tapPending = false;
     }
 
     /** Call once per frame, before anything reads `axis` or `throttle`. */

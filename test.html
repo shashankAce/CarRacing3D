@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Car2 FBX visibility test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #101822;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #status {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 1;
+      padding: 9px 12px;
+      border-radius: 8px;
+      background: rgb(8 13 20 / 78%);
+      color: #e5eef8;
+      font-size: 14px;
+    }
+
+    #help {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      z-index: 1;
+      color: #b9cadb;
+      font-size: 12px;
+      text-shadow: 0 1px 2px #000;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="status">Loading Car2.fbx…</div>
+  <div id="help">Drag to orbit · Scroll to zoom · Right-drag to pan</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+    const status = document.querySelector('#status');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x101822);
+
+    const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.01, 100000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    document.body.append(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.HemisphereLight(0xd7ecff, 0x26313c, 2.5));
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3.5);
+    keyLight.position.set(5, 8, 4);
+    scene.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x79aaff, 1.5);
+    fillLight.position.set(-5, 3, -6);
+    scene.add(fillLight);
+
+    const grid = new THREE.GridHelper(20, 20, 0x5f7c96, 0x304252);
+    scene.add(grid);
+
+    // The FBX references Unity .mat assets. Three.js can read the geometry but
+    // not Unity material files, so reproduce the three Car2 materials here.
+    const pixelColors = new THREE.TextureLoader().load('./res/models/vehicles/PixelColors.png');
+    pixelColors.colorSpace = THREE.SRGBColorSpace;
+    pixelColors.magFilter = THREE.NearestFilter;
+    pixelColors.minFilter = THREE.NearestMipmapNearestFilter;
+
+    function createCarMaterial(name) {
+      if (name === 'PixelColors') {
+        return new THREE.MeshStandardMaterial({ map: pixelColors, roughness: 0.22, metalness: 0.05 });
+      }
+      if (name === 'Glass') {
+        return new THREE.MeshPhysicalMaterial({
+          color: 0x333333, roughness: 0.12, metalness: 0.1,
+          transparent: true, opacity: 0.545, transmission: 0.05,
+        });
+      }
+      if (name === 'Headlights') {
+        return new THREE.MeshStandardMaterial({
+          color: 0xffd800, emissive: 0xffb000, emissiveIntensity: 3.5,
+          roughness: 0.3,
+        });
+      }
+      return new THREE.MeshStandardMaterial({ color: 0x9da9b7, roughness: 0.65 });
+    }
+
+    new FBXLoader().load(
+      './res/models/vehicles/MicroBus4.fbx',
+      (model) => {
+        model.traverse((object) => {
+          if (!object.isMesh) return;
+          const hadMaterialArray = Array.isArray(object.material);
+          const materials = hadMaterialArray ? object.material : [object.material];
+          const convertedMaterials = materials.map((material) => createCarMaterial(material?.name));
+          // Sedan1's tire meshes have one material and no geometry groups.
+          // Three.js only renders an array of materials when matching groups exist.
+          object.material = hadMaterialArray ? convertedMaterials : convertedMaterials[0];
+        });
+
+        // Normalize around the origin so models exported in any units/frame are visible.
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const radius = Math.max(size.length() / 2, 0.01);
+        model.position.sub(center);
+        scene.add(model);
+
+        grid.scale.setScalar(Math.max(radius / 10, 0.01));
+        camera.near = radius / 1000;
+        camera.far = radius * 1000;
+        camera.position.set(radius * 1.6, radius * 1.05, radius * 1.6);
+        camera.updateProjectionMatrix();
+        controls.target.set(0, 0, 0);
+        controls.minDistance = radius * 0.2;
+        controls.maxDistance = radius * 20;
+        controls.update();
+        status.textContent = `Loaded Car2 — ${model.children.length} top-level object(s)`;
+      },
+      (event) => {
+        if (event.total) status.textContent = `Loading FBX… ${Math.round(event.loaded / event.total * 100)}%`;
+      },
+      (error) => {
+        console.error(error);
+        status.textContent = 'Could not load Car2.fbx — check the browser console.';
+        status.style.color = '#ffb4ad';
+      },
+    );
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+
+</html>
