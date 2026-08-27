@@ -159,7 +159,7 @@ export const gameConfig = {
          * speed / chunkSize — one row per 40m travelled however far ahead it
          * sits. It costs resident memory and triangles only.
          */
-        chunksAhead: 7,
+        chunksAhead: 5,
         chunksBehind: 1,
         /**
          * Depth of the downward wall hung off each chunk's border, hiding any
@@ -208,7 +208,7 @@ export const gameConfig = {
          * resident chunk has to be rebuilt on a change.
          */
         selfShadow: {
-            enabled: true,
+            enabled: false,
             /**
              * How dark a fully occluded vertex gets: albedo is multiplied by
              * `1 - strength`. Deliberately well short of black — the ground in
@@ -1160,7 +1160,7 @@ export const gameConfig = {
              * `debugStats`; worth doing if memory ever binds. Download size — the
              * actual 2MB budget — is untouched either way.
              */
-            maskSize: 1024,
+            maskSize: 512,
             /**
              * Side of the world window the mask covers, metres. Trades texel
              * density directly against how far ahead shadows exist at all, and
@@ -1521,7 +1521,7 @@ export const gameConfig = {
          * and check `maxPerVariant`, because the near tier demotes overflow back
          * to billboards rather than dropping it.
          */
-        lodCrossover: 200,
+        lodCrossover: 180,
         /** Baked impostor texture edge, pixels. */
         spriteTextureSize: 128,
         /** Ceiling on live billboards. Cheap enough to be generous. */
