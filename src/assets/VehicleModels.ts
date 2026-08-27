@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { assetCache } from 'noonengine';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 export type VehicleModelId = string;
@@ -13,10 +15,11 @@ export interface VehicleVisual {
 
 type VehicleSpec = typeof cfg.vehicles.models[number];
 type VehicleMaterialKey = 'PixelColors' | 'Glass' | 'Headlights' | 'Fallback';
+type VehicleDetail = 'full' | 'distant';
 
 interface VehicleTemplate {
-    /** One renderable static mesh per material class — normally three meshes. */
-    geometries: Map<VehicleMaterialKey, THREE.BufferGeometry>;
+    /** One renderable static mesh per material class for each supported tier. */
+    geometries: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry>>;
 }
 
 const MATERIAL_ORDER: VehicleMaterialKey[] = ['PixelColors', 'Glass', 'Headlights', 'Fallback'];
@@ -58,12 +61,13 @@ export class VehicleModels {
         return spec;
     }
 
-    create(id: VehicleModelId): VehicleVisual {
+    create(id: VehicleModelId, detail: VehicleDetail = 'full'): VehicleVisual {
         const template = this._templates.get(id);
         if (!template || !this._palette) throw new Error(`Vehicle model "${id}" has not loaded.`);
 
         const root = new THREE.Group();
         const materials: THREE.Material[] = [];
+        const geometries = template.geometries[detail];
 
         // The FBXs are static. Their original 8–10 meshes and 33–40 material
         // groups were the source of hundreds of mobile draw calls for traffic.
@@ -72,7 +76,7 @@ export class VehicleModels {
         // pool slots; only the three materials are per-visual because player and
         // traffic receivers need different projected-shadow `skip` values.
         for (const key of MATERIAL_ORDER) {
-            const geometry = template.geometries.get(key);
+            const geometry = geometries.get(key);
             if (!geometry) continue;
             const material = this._createMaterial(key);
             const mesh = new THREE.Mesh(geometry, material);
@@ -85,7 +89,7 @@ export class VehicleModels {
         // Shadow capture still receives all original triangles. Clones are
         // intentional: traffic shifts its first visual's capture geometry into
         // its centre-origin group, and must never mutate shared render geometry.
-        const shadowGeometries = [...template.geometries.values()].map((geometry) => geometry.clone());
+        const shadowGeometries = [...geometries.values()].map((geometry) => geometry.clone());
 
         return { root, materials, shadowGeometries };
     }
@@ -102,7 +106,10 @@ export class VehicleModels {
         model.position.set(-centre.x, -bounds.min.y, -centre.z);
         model.updateMatrixWorld(true);
 
-        const batches = new Map<VehicleMaterialKey, THREE.BufferGeometry[]>();
+        const batches: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry[]>> = {
+            full: new Map(),
+            distant: new Map(),
+        };
         model.traverse((object) => {
             if (!(object instanceof THREE.Mesh)) return;
             const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
@@ -115,18 +122,44 @@ export class VehicleModels {
                 // This leaves every compact mesh in the vehicle root's local
                 // space, exactly matching the old hierarchy after normalisation.
                 part.applyMatrix4(object.matrixWorld);
-                const list = batches.get(key) ?? [];
-                list.push(part);
-                batches.set(key, list);
+                this._appendBatch(batches.full, key, part);
+                // Simplify each original part BEFORE it is batched by material.
+                // A tyre is a small disconnected island beside the body in the
+                // PixelColors batch. Simplifying the merged batch let the edge
+                // collapses spend the whole reduction budget on those small
+                // islands, which could make distant tyres disappear.
+                const lodPart = sliceGroup(object.geometry, group.start, group.count);
+                lodPart.applyMatrix4(object.matrixWorld);
+                const simplifiedPart = simplifyGeometry(lodPart, spec.lod.vertexReduction);
+                lodPart.dispose();
+                this._appendBatch(batches.distant, key, simplifiedPart);
             }
         });
 
-        const geometries = new Map<VehicleMaterialKey, THREE.BufferGeometry>();
-        for (const key of MATERIAL_ORDER) {
-            const parts = batches.get(key);
-            if (parts && parts.length > 0) geometries.set(key, mergeStaticParts(parts));
+        const geometries: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry>> = {
+            full: new Map(),
+            distant: new Map(),
+        };
+        for (const detail of ['full', 'distant'] as const) {
+            for (const key of MATERIAL_ORDER) {
+                const parts = batches[detail].get(key);
+                if (parts && parts.length > 0) geometries[detail].set(key, mergeStaticParts(parts));
+            }
         }
+        // The distant tier still has only one draw per material class, but its
+        // body, wheels, glass, lights, doors and interior have each received
+        // the same configurable reduction before batching.
         return { geometries };
+    }
+
+    private _appendBatch(
+        batches: Map<VehicleMaterialKey, THREE.BufferGeometry[]>,
+        key: VehicleMaterialKey,
+        part: THREE.BufferGeometry,
+    ): void {
+        const list = batches.get(key) ?? [];
+        list.push(part);
+        batches.set(key, list);
     }
 
     private _materialKey(name: string | undefined): VehicleMaterialKey {
@@ -213,4 +246,29 @@ function mergeStaticParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
     for (const part of parts) part.dispose();
     result.computeBoundingSphere();
     return result;
+}
+
+/**
+ * Produces a textured, reduced version of a real vehicle material batch for distant
+ * traffic. UV seams remain protected by `mergeVertices`, so PixelColors keeps
+ * its intended palette rather than smearing across panels.
+ */
+function simplifyGeometry(source: THREE.BufferGeometry, vertexReduction: number): THREE.BufferGeometry {
+    const welded = mergeVertices(source);
+    const vertices = welded.getAttribute('position').count;
+    // Keep enough vertices for a closed vehicle silhouette even if a reskin
+    // sets a very aggressive ratio. The modifier works in removed vertices,
+    // not target triangles.
+    const remove = Math.max(0, Math.min(
+        vertices - 12,
+        Math.floor(vertices * THREE.MathUtils.clamp(vertexReduction, 0, 0.9)),
+    ));
+    if (remove === 0) {
+        welded.computeBoundingSphere();
+        return welded;
+    }
+    const simplified = new SimplifyModifier().modify(welded, remove);
+    welded.dispose();
+    simplified.computeBoundingSphere();
+    return simplified;
 }

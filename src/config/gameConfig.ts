@@ -375,13 +375,22 @@ export const gameConfig = {
         /** Ceiling on live vehicles; the pool is allocated to exactly this. */
         maxAlive: 16,
         /**
+         * Distant traffic keeps the same complete vehicle, but uses reduced
+         * geometry. Tune or disable this entirely from this block.
+         */
+        lod: {
+            enabled: true,
+            /** True 3D distance from the player at which the full FBX appears. */
+            fullDetailDistance: 100,
+        },
+        /**
          * Where new vehicles appear, metres ahead of the player. Far enough that
          * they emerge from the fog with time to react, and inside the terrain
          * draw distance so they never hang in empty space.
          */
         spawnAhead: 210,
         /** Recycled once this far behind the player. */
-        despawnBehind: 45,
+        despawnBehind: 15,
         /**
          * Also recycled once this far AHEAD. Required, not symmetry for its own
          * sake: any vehicle faster than the player recedes forever and, with
@@ -772,11 +781,11 @@ export const gameConfig = {
         /** The car pre-highlighted in the selection screen. */
         playerDefault: 'sport',
         models: [
-            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', scale: 0.007, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21 },
-            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', scale: 0.007, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60 },
-            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', scale: 0.007, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20 },
-            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', scale: 0.007, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23 },
-            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', scale: 0.007, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86 },
+            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.007, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21 },
+            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.007, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60 },
+            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.007, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20 },
+            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.007, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23 },
+            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.007, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86 },
         ],
         materials: {
             pixelColors: { roughness: 0.22, metalness: 0.05 },

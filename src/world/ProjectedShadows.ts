@@ -341,8 +341,11 @@ float treeMaskFactor() {
 float projShadowFactor() {
     float occ = 0.0;
     for (int i = 0; i < ${count}; i++) {
-        ${skip >= 0 ? `if (i == ${skip}) continue;` : ''}
         vec4 origin = uProjShadowOrigin[i];
+        // skip is an atlas-caster handle (stored in origin.w), not this
+        // frame's live-slot index. Slots are distance-sorted every frame, so
+        // comparing it with i made self-skip depend on traffic ordering.
+        ${skip >= 0 ? `if (abs(origin.w - ${skip}.0) < 0.5) continue;` : ''}
         vec3 rel = vProjShadowWorld - origin.xyz;
         // Metres down-light of the caster origin. It is compared with the
         // per-pixel capture depth below; the origin alone is not a valid near

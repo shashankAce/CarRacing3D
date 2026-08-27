@@ -21,6 +21,10 @@ export interface TrafficVehicle {
     body: THREE.Mesh;
     /** The static FBX visual assigned to this pool slot's configured type. */
     model: THREE.Object3D | null;
+    /** Reduced version of this same FBX used outside the full-detail radius. */
+    lodModel: THREE.Object3D | null;
+    /** Cached to avoid toggling child visibility when a vehicle remains in one tier. */
+    fullDetail: boolean;
     /** Fixed per pool slot, so spawning never allocates a new model. */
     modelType: number;
     indicator: THREE.Mesh;
@@ -79,6 +83,8 @@ export class TrafficSystem {
     private _pool: TrafficVehicle[] = [];
     private _shadowHandles: number[] = [];
     private _materials: THREE.Material[] = [];
+    /** Materials grouped by caster type, for type-level projected self-skip. */
+    private _materialsByType: THREE.Material[][] = [];
     private _modelShadowGeometries: THREE.BufferGeometry[][] = [];
     /** Player travel at which the next spawn is attempted. */
     private _nextSpawnAt = 0;
@@ -123,7 +129,8 @@ export class TrafficSystem {
             group.object3D.visible = false;
 
             this._pool.push({
-                group, body, indicator, model: null, modelType: slotTypes[i % slotTypes.length], active: false, type: 0,
+                group, body, indicator, model: null, lodModel: null, fullDetail: true,
+                modelType: slotTypes[i % slotTypes.length], active: false, type: 0,
                 laneF: 0, targetLane: 0, worldZ: 0,
                 desiredSpeed: 0, speed: 0,
                 manoeuvre: Manoeuvre.CRUISING, signalTimer: 0, signalDir: 0,
@@ -149,9 +156,11 @@ export class TrafficSystem {
      */
     attachModels(models: VehicleModels): void {
         this._materials = [];
+        this._materialsByType = cfg.traffic.types.map(() => [] as THREE.Material[]);
         this._modelShadowGeometries = cfg.traffic.types.map(() => [] as THREE.BufferGeometry[]);
         for (const v of this._pool) {
             if (v.model) v.group.object3D.remove(v.model);
+            if (v.lodModel) v.group.object3D.remove(v.lodModel);
             const spec = cfg.traffic.types[v.modelType];
             const visual = models.create(spec.model);
             // VehicleModels rests a visual on local y=0. Traffic placement uses
@@ -165,7 +174,14 @@ export class TrafficSystem {
             }
             v.model = visual.root;
             v.group.object3D.add(v.model);
-            this._materials.push(...visual.materials);
+            const lodVisual = models.create(spec.model, 'distant');
+            // The compact LOD shares the full model's normalized local origin.
+            lodVisual.root.position.y -= spec.height / 2;
+            v.lodModel = lodVisual.root;
+            v.lodModel.visible = false;
+            v.group.object3D.add(v.lodModel);
+            this._materials.push(...visual.materials, ...lodVisual.materials);
+            this._materialsByType[v.modelType].push(...visual.materials, ...lodVisual.materials);
         }
     }
 
@@ -206,7 +222,7 @@ export class TrafficSystem {
      * @param travelled Player's absolute world Z.
      * @param speedT    0…1 through the speed ramp — tightens the spawn spacing.
      */
-    update(dt: number, travelled: number, speedT: number): void {
+    update(dt: number, travelled: number, speedT: number, playerX: number): void {
         this._blinkClock += dt;
 
         for (const v of this._pool) {
@@ -229,10 +245,11 @@ export class TrafficSystem {
                 continue;
             }
             this._place(v, travelled);
+            this._updateLod(v, playerX);
         }
 
         if (travelled >= this._nextSpawnAt) {
-            this._placeAt(travelled + cfg.traffic.spawnAhead, travelled);
+            this._placeAt(travelled + cfg.traffic.spawnAhead, travelled, playerX);
             const t = cfg.traffic;
             const gap = t.spawnGapSlow + (t.spawnGapFast - t.spawnGapSlow) * speedT;
             this._nextSpawnAt = travelled + gap;
@@ -388,6 +405,17 @@ export class TrafficSystem {
      */
     /** Every vehicle material, so traffic can RECEIVE the player's shadow. */
     get receiverMaterials(): THREE.Material[] { return this._materials; }
+
+    /**
+     * Traffic shares one baked silhouette per configured type. Grouping
+     * receivers the same way lets a Sedan ignore its own Sedan silhouette,
+     * eliminating self-shadowing without adding one atlas cell per live car.
+     */
+    get receiverMaterialsByType(): readonly (readonly THREE.Material[])[] {
+        return this._materialsByType;
+    }
+
+    projectedHandle(type: number): number { return this._projectedHandles[type] ?? -1; }
 
     /**
      * Registers one caster per vehicle TYPE.
@@ -557,7 +585,7 @@ export class TrafficSystem {
         }
     }
 
-    private _placeAt(spawnZ: number, travelled: number): boolean {
+    private _placeAt(spawnZ: number, travelled: number, playerX = 0): boolean {
         const t = cfg.traffic;
         const slot = this._pool.find(v => !v.active);
         if (!slot) return false;                 // pool full — density is capped
@@ -604,7 +632,22 @@ export class TrafficSystem {
         slot.group.object3D.visible = true;
         slot.indicator.visible = false;
         this._place(slot, travelled);
+        this._updateLod(slot, playerX, true);
         return true;
+    }
+
+    /** Switches a vehicle between its detailed FBX and reduced same-car tier. */
+    private _updateLod(v: TrafficVehicle, playerX: number, force = false): void {
+        if (!v.model || !v.lodModel) return;
+        const lod = cfg.traffic.lod;
+        const obj = v.group.object3D;
+        const dx = obj.position.x - playerX;
+        const fullDetail = !lod.enabled
+            || dx * dx + obj.position.z * obj.position.z < lod.fullDetailDistance * lod.fullDetailDistance;
+        if (!force && v.fullDetail === fullDetail) return;
+        v.fullDetail = fullDetail;
+        v.model.visible = fullDetail;
+        v.lodModel.visible = !fullDetail;
     }
 
 }

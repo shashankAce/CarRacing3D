@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Custom tyre and rim lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #111820; }
+    canvas { display: block; }
+    #panel {
+      position: fixed; z-index: 2; top: 16px; left: 16px; width: min(320px, calc(100vw - 32px));
+      padding: 14px; border: 1px solid rgb(190 212 235 / 24%); border-radius: 12px;
+      background: rgb(7 12 18 / 89%); color: #edf5fd; box-shadow: 0 10px 30px rgb(0 0 0 / 33%);
+      font-size: 13px;
+    }
+    h1 { margin: 0 0 7px; font-size: 16px; }
+    p { margin: 0 0 12px; color: #b8c7d5; line-height: 1.35; }
+    label { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: center; margin-top: 10px; color: #d1dce7; }
+    input, select { grid-column: 1 / -1; width: 100%; accent-color: #77c1ff; }
+    select { border: 1px solid #516270; border-radius: 6px; padding: 6px; background: #19232c; color: inherit; }
+    output { color: #91d2ff; font-variant-numeric: tabular-nums; }
+    #stats { margin-top: 13px; padding-top: 10px; border-top: 1px solid rgb(190 212 235 / 17%); color: #b8c7d5; line-height: 1.45; }
+    #stats strong { color: #f1f7fd; }
+    #help { position: fixed; z-index: 2; bottom: 16px; left: 16px; color: #c5d2df; font-size: 12px; text-shadow: 0 1px 2px #000; }
+    @media (max-width: 640px) { #help { display: none; } }
+  </style>
+</head>
+
+<body>
+  <section id="panel">
+    <h1>Custom tyre + rim lab</h1>
+    <p>Original wheel is on the left; the shared replacement is on the right. Decimate only the original to find the lowest acceptable source detail before replacing it.</p>
+    <label>Original vehicle
+      <select id="vehicle">
+        <option value="SportCar2">SportCar2</option>
+        <option value="Sedan1">Sedan1</option>
+        <option value="Car2">Car2</option>
+        <option value="Jeep2">Jeep2</option>
+        <option value="MicroBus4">MicroBus4</option>
+      </select>
+    </label>
+    <label>Original wheel reduction <output id="reduction-value"></output>
+      <input id="reduction" type="range" min="0" max="90" value="0" step="1" />
+    </label>
+    <label>Tyre shape
+      <select id="profile">
+        <option value="donut">Rounded donut</option>
+        <option value="cylinder">Flat cylinder</option>
+      </select>
+    </label>
+    <label>Tyre segments <output id="segments-value"></output>
+      <input id="segments" type="range" min="8" max="24" value="12" step="1" />
+    </label>
+    <label>Tyre width <output id="width-value"></output>
+      <input id="width" type="range" min="0.22" max="0.48" value="0.34" step="0.01" />
+    </label>
+    <label>Rim size <output id="rim-value"></output>
+      <input id="rim" type="range" min="0.46" max="0.72" value="0.58" step="0.01" />
+    </label>
+    <div id="stats"><strong id="original-stats">Loading original wheel…</strong><br><span id="custom-stats"></span></div>
+  </section>
+  <div id="help">Drag to orbit · Scroll to zoom · Use the sliders to compare detail and triangle count</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+    import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+    import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+    const elements = {
+      vehicle: document.querySelector('#vehicle'), reduction: document.querySelector('#reduction'),
+      profile: document.querySelector('#profile'), segments: document.querySelector('#segments'),
+      width: document.querySelector('#width'), rim: document.querySelector('#rim'),
+      originalStats: document.querySelector('#original-stats'), customStats: document.querySelector('#custom-stats'),
+    };
+    const outputs = {
+      reduction: document.querySelector('#reduction-value'),
+      segments: document.querySelector('#segments-value'),
+      width: document.querySelector('#width-value'),
+      rim: document.querySelector('#rim-value'),
+    };
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x9cabb7);
+    scene.fog = new THREE.Fog(0x9cabb7, 8, 18);
+    const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.01, 100);
+    camera.position.set(3.2, 2.35, 4.4);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.append(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.54, 0);
+    controls.enableDamping = true;
+    controls.minDistance = 1.6;
+    controls.maxDistance = 9;
+
+    scene.add(new THREE.HemisphereLight(0xdcecff, 0x28303a, 2.0));
+    const sun = new THREE.DirectionalLight(0xfff0d4, 3.2);
+    sun.position.set(-4, 7, 5);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    scene.add(sun);
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(20, 20),
+      new THREE.MeshStandardMaterial({ color: 0x424a50, roughness: 0.92 }),
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+    const grid = new THREE.GridHelper(14, 14, 0x64727b, 0x536068);
+    grid.position.y = 0.002;
+    scene.add(grid);
+
+    const customWheel = new THREE.Group();
+    customWheel.position.set(1.25, 0.84, 0);
+    scene.add(customWheel);
+    const originalWheel = new THREE.Group();
+    originalWheel.position.set(-1.25, 0.84, 0);
+    scene.add(originalWheel);
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x111419, roughness: 0.78, metalness: 0.02 });
+    const alloy = new THREE.MeshStandardMaterial({ color: 0xb7c1c9, roughness: 0.22, metalness: 0.86 });
+    const hub = new THREE.MeshStandardMaterial({ color: 0x343c44, roughness: 0.25, metalness: 0.84 });
+
+    function triangles(object) {
+      let total = 0;
+      object.traverse((node) => {
+        if (!node.isMesh) return;
+        const geometry = node.geometry;
+        total += geometry.index ? geometry.index.count / 3 : geometry.getAttribute('position').count / 3;
+      });
+      return total;
+    }
+
+    function disposeWheel() {
+      while (customWheel.children.length) {
+        const child = customWheel.children.pop();
+        child.traverse((node) => { if (node.isMesh) node.geometry.dispose(); });
+      }
+    }
+
+    // The wheel axis is X, matching the bundled FBX wheels. Both choices are
+    // deliberately primitive geometry so the new asset has a fixed, tiny cost.
+    function rebuild() {
+      const profile = elements.profile.value;
+      const segments = Number(elements.segments.value);
+      const width = Number(elements.width.value);
+      const rimRadius = Number(elements.rim.value);
+      outputs.segments.value = segments;
+      outputs.width.value = width;
+      outputs.rim.value = rimRadius;
+      disposeWheel();
+
+      const tyreGeometry = profile === 'donut'
+        ? new THREE.TorusGeometry(0.82, 0.19, 3, segments)
+        : new THREE.CylinderGeometry(0.82, 0.82, width, segments);
+      const tyre = new THREE.Mesh(tyreGeometry, rubber);
+      tyre.rotation[profile === 'donut' ? 'y' : 'z'] = Math.PI / 2;
+      if (profile === 'donut') tyre.scale.x = width / 0.38;
+      tyre.castShadow = true;
+      tyre.receiveShadow = true;
+      customWheel.add(tyre);
+
+      // One short cylinder provides a rim face on both sides of the wheel.
+      // It is intentionally a plain disc; it can later be swapped for a more
+      // stylised rim without touching the tyre or vehicle placement code.
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(rimRadius, rimRadius, width * 1.04, segments), alloy);
+      rim.rotation.z = Math.PI / 2;
+      rim.castShadow = true;
+      customWheel.add(rim);
+      const centre = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, width * 1.08, 6), hub);
+      centre.rotation.z = Math.PI / 2;
+      centre.castShadow = true;
+      customWheel.add(centre);
+      elements.customStats.innerHTML = `Custom ${profile}: <strong>${triangles(customWheel)} triangles / wheel</strong> · ${triangles(customWheel) * 4} for four wheels`;
+    }
+
+    let originalBase = null;
+    let originalMesh = null;
+    const originalMaterial = new THREE.MeshStandardMaterial({ color: 0x262b30, roughness: 0.62, metalness: 0.22 });
+
+    function disposeOriginalMesh() {
+      if (!originalMesh) return;
+      originalWheel.remove(originalMesh);
+      originalMesh.geometry.dispose();
+      originalMesh = null;
+    }
+
+    function rebuildOriginal() {
+      if (!originalBase) return;
+      disposeOriginalMesh();
+      const welded = mergeVertices(originalBase);
+      const vertices = welded.getAttribute('position').count;
+      const requested = Number(elements.reduction.value) / 100;
+      const remove = Math.max(0, Math.min(vertices - 12, Math.floor(vertices * requested)));
+      const geometry = remove > 0 ? new SimplifyModifier().modify(welded, remove) : welded;
+      if (geometry !== welded) welded.dispose();
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      originalMesh = new THREE.Mesh(geometry, originalMaterial);
+      originalMesh.castShadow = true;
+      originalMesh.receiveShadow = true;
+      originalWheel.add(originalMesh);
+      outputs.reduction.value = `${elements.reduction.value}%`;
+      elements.originalStats.innerHTML = `Original ${elements.vehicle.value}: <strong>${triangles(originalWheel)} triangles / wheel</strong> after ${elements.reduction.value}% reduction`;
+    }
+
+    async function loadOriginalWheel() {
+      disposeOriginalMesh();
+      originalBase?.dispose();
+      originalBase = null;
+      elements.originalStats.textContent = `Loading ${elements.vehicle.value} original wheel…`;
+      const source = await new FBXLoader().loadAsync(`./res/models/vehicles/${elements.vehicle.value}.fbx`);
+      source.updateMatrixWorld(true);
+      // All bundled FBXs use FR/FL/BR/BL for the four tyres. Any one is enough
+      // for this lab because all four original wheel meshes are identical.
+      const wheel = source.getObjectByName('FR') ?? source.getObjectByName('FL') ?? source.getObjectByName('BR') ?? source.getObjectByName('BL');
+      if (!wheel?.isMesh) throw new Error(`No FR/FL/BR/BL wheel mesh in ${elements.vehicle.value}.`);
+      const geometry = wheel.geometry.clone();
+      geometry.applyMatrix4(wheel.matrixWorld);
+      geometry.computeBoundingBox();
+      const centre = geometry.boundingBox.getCenter(new THREE.Vector3());
+      geometry.translate(-centre.x, -centre.y, -centre.z);
+      const size = geometry.boundingBox.getSize(new THREE.Vector3());
+      // Source wheels are in Unity centimetre-like units. Normalising the
+      // diameter lets the original sit next to the 0.82-radius custom wheel.
+      const scale = 1.64 / Math.max(size.y, size.z);
+      geometry.scale(scale, scale, scale);
+      originalBase = geometry;
+      rebuildOriginal();
+    }
+
+    elements.vehicle.addEventListener('change', () => { loadOriginalWheel().catch((error) => { elements.originalStats.textContent = error.message; }); });
+    elements.reduction.addEventListener('input', rebuildOriginal);
+    for (const input of [elements.profile, elements.segments, elements.width, elements.rim]) {
+      if (input instanceof HTMLInputElement) input.addEventListener('input', rebuild);
+      if (input instanceof HTMLSelectElement) input.addEventListener('change', rebuild);
+    }
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+    rebuild();
+    loadOriginalWheel().catch((error) => { elements.originalStats.textContent = error.message; });
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+
+</html>

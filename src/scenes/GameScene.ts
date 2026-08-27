@@ -335,7 +335,7 @@ export class GameScene extends Scene {
             const travelled = this._state.scroll.travelled;
             // The car's world Z is `travelled` — it always renders at z ≈ 0.
             this._car.update(dt, this._input.axis, travelled, this._state.speed);
-            this._traffic.update(dt, travelled, this._state.speedT);
+            this._traffic.update(dt, travelled, this._state.speedT, this._car.position.x);
 
             // Collision AFTER both have moved this frame, so neither is tested
             // against the other's previous position.
@@ -473,8 +473,18 @@ export class GameScene extends Scene {
 
     private _attachTrafficMaterials(): void {
         if (!cfg.lighting.projectedShadows.enabled) return;
-        for (const material of this._traffic.receiverMaterials) {
-            this._projected.attach(material, { groundMask: true, maskLift: true });
+        const byType = this._traffic.receiverMaterialsByType;
+        for (let type = 0; type < byType.length; type++) {
+            for (const material of byType[type]) {
+                this._projected.attach(material, {
+                    // One atlas cell is shared by each traffic type. Skipping
+                    // that cell avoids a car darkening itself; the small trade
+                    // off is that two same-type cars do not shadow each other.
+                    skip: this._traffic.projectedHandle(type),
+                    groundMask: true,
+                    maskLift: true,
+                });
+            }
         }
     }
 
