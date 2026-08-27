@@ -408,7 +408,7 @@ export const gameConfig = {
         lod: {
             enabled: true,
             /** True 3D distance from the player at which the full FBX appears. */
-            fullDetailDistance: 120,
+            fullDetailDistance: 190,
         },
         /**
          * Where new vehicles appear, metres ahead of the player. Far enough that
@@ -426,7 +426,7 @@ export const gameConfig = {
          * than `speed.start`, so this should never fire — it's the backstop for
          * a reskin that raises a traffic speed above the player's opening pace.
          */
-        despawnAhead: 270,
+        despawnAhead: 210,
         /**
          * Vehicles placed across the road at the start of a run, and the nearest
          * one's distance. Without seeding, the first encounter is governed by
@@ -564,7 +564,7 @@ export const gameConfig = {
      */
     roadSurface: {
         bandLength: 20,
-        bandsAhead: 10,
+        bandsAhead: 11,
         bandsBehind: 1,
         /** Z-subdivisions per band. Only matters when `curveAmplitude` is non-zero. */
         segmentsPerBand: 4,
@@ -625,7 +625,7 @@ export const gameConfig = {
      */
     speed: {
         start: 30,
-        min: 24,
+        min: 20,
         max: 66,
         /** m/s² under gas. 7 takes 24 -> 66 in about six seconds. */
         accelerate: 7,
@@ -1355,7 +1355,7 @@ export const gameConfig = {
          * trees grow out of the verge and the player clips scenery that looks
          * like it's beside the road rather than on it.
          */
-        roadClearance: 12,
+        roadClearance: 10,
         /**
          * Density mask: candidates whose noise value falls below this are
          * dropped, which is what produces clumps and clearings instead of an
@@ -1409,7 +1409,7 @@ export const gameConfig = {
          * and check `maxPerVariant`, because the near tier demotes overflow back
          * to billboards rather than dropping it.
          */
-        lodCrossover: 180,
+        lodCrossover: 190,
         /** Baked impostor texture edge, pixels. */
         spriteTextureSize: 128,
         /** Ceiling on live billboards. Cheap enough to be generous. */
@@ -1766,7 +1766,7 @@ export const gameConfig = {
          * Left ON while profiling on real devices. Turn it off before shipping —
          * it's a per-frame label bake and it covers the screen.
          */
-        showPerf: true,
+        showPerf: false,
     },
 
     /**
@@ -1775,7 +1775,7 @@ export const gameConfig = {
      * mobile — see ARCHITECTURE.md §2.4.
      */
     render: {
-        pixelRatioCap: 2,
-        resolutionScale: 1,
+        pixelRatioCap: 2.5,
+        resolutionScale: 2,
     },
 };
