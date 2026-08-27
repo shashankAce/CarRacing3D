@@ -10,7 +10,7 @@ import type { WorldScroll } from './WorldScroll';
  *
  * On the flat placeholder world these are the only thing conveying motion, and
  * they're deliberately built the way the Phase 6 scatter fields will be: one
- * InstancedMesh per prop type, matrices rewritten each frame.
+ * InstancedMesh per prop type.
  *
  * Two engine rules are load-bearing here (ARCHITECTURE.md §3, items 4 and 5):
  *  - `count` is allocated ONCE. Assigning the wrapper's `count` later rebuilds
@@ -31,13 +31,19 @@ export class RoadMarkers {
     private _dashes: InstancedMesh3D;
     private _posts: InstancedMesh3D;
     private _scroll: WorldScroll;
-    // Scratch objects, reused for every instance every frame — this runs
-    // `dash.count + post.count * 2` times per frame and must not allocate.
+    // Scratch objects, reused whenever a marker set wraps — this runs
+    // `dash.count + post.count * 2` times per refresh and must not allocate.
     private _matrix = new THREE.Matrix4();
     private _position = new THREE.Vector3();
     private _euler = new THREE.Euler();
     private _quaternion = new THREE.Quaternion();
     private _scale = new THREE.Vector3(1, 1, 1);
+    /** Integer wrap step represented by each instance buffer. */
+    private _dashStep = Number.NaN;
+    private _postStep = Number.NaN;
+    /** Travel values at which the corresponding matrices were written. */
+    private _dashAnchor = 0;
+    private _postAnchor = 0;
 
     constructor(scene: Scene, scroll: WorldScroll) {
         this._scroll = scroll;
@@ -95,10 +101,25 @@ export class RoadMarkers {
      * road corridor.
      */
     update(): void {
-        const ahead = cfg.markers.aheadFraction;
         const travelled = this._scroll.travelled;
+        this._updateDashes(travelled);
+        this._updatePosts(travelled);
+    }
 
+    /** Scrolls the dash batch, rebuilding it only when one dash wraps ahead. */
+    private _updateDashes(travelled: number): void {
         const d = cfg.markers.dash;
+        const step = Math.floor(travelled / d.spacing);
+        const object = this._dashes.object3D;
+        if (step === this._dashStep) {
+            object.position.z = travelled - this._dashAnchor;
+            return;
+        }
+
+        this._dashStep = step;
+        this._dashAnchor = travelled;
+        object.position.z = 0;
+        const ahead = cfg.markers.aheadFraction;
         const dashLift = cfg.roadSurface.lift + 0.01;
         for (let i = 0; i < d.count; i++) {
             const z = this._scroll.repeatingZ(i, d.spacing, d.count, ahead);
@@ -107,11 +128,25 @@ export class RoadMarkers {
             this._euler.set(roadPitchAt(worldZ, d.length), roadHeadingAt(worldZ), 0);
             this._quaternion.setFromEuler(this._euler);
             this._matrix.compose(this._position, this._quaternion, this._scale);
-            this._dashes.object3D.setMatrixAt(i, this._matrix);
+            object.setMatrixAt(i, this._matrix);
         }
-        this._dashes.object3D.instanceMatrix.needsUpdate = true;
+        object.instanceMatrix.needsUpdate = true;
+    }
 
+    /** Scrolls the post batch, rebuilding it only when one post pair wraps. */
+    private _updatePosts(travelled: number): void {
         const p = cfg.markers.post;
+        const step = Math.floor(travelled / p.spacing);
+        const object = this._posts.object3D;
+        if (step === this._postStep) {
+            object.position.z = travelled - this._postAnchor;
+            return;
+        }
+
+        this._postStep = step;
+        this._postAnchor = travelled;
+        object.position.z = 0;
+        const ahead = cfg.markers.aheadFraction;
         const offset = cfg.road.halfWidth + p.offset;
         for (let i = 0; i < p.count; i++) {
             const z = this._scroll.repeatingZ(i, p.spacing, p.count, ahead);
@@ -121,9 +156,9 @@ export class RoadMarkers {
                 const x = centre + (side === 0 ? -offset : offset);
                 const base = heightAt(x, worldZ);
                 this._matrix.makeTranslation(x, base + p.height / 2, z);
-                this._posts.object3D.setMatrixAt(i * 2 + side, this._matrix);
+                object.setMatrixAt(i * 2 + side, this._matrix);
             }
         }
-        this._posts.object3D.instanceMatrix.needsUpdate = true;
+        object.instanceMatrix.needsUpdate = true;
     }
 }
