@@ -21,6 +21,11 @@ The original plan below is entirely implemented and confirmed in current
 7. **Reduce projected-shadow casters** — `projectedShadows.maxCasters: 6`,
    left at 6 deliberately (derived from `traffic.spawnAhead`, not a guess —
    see the config comment).
+8. **Coarse-reject projected-shadow casters per fragment** — done. Each live
+   caster now supplies a conservative XZ rectangle derived from the exact
+   light-space r/u/d volume. Fragments outside it skip the caster before the
+   expensive dot products and atlas-coordinate work, without changing any
+   accepted shadow sample.
 
 The measurements and per-vehicle table below this line are from before that
 work and are now stale — the FBX draw-call counts (33-40/vehicle) no longer

@@ -121,6 +121,13 @@ export class ProjectedShadows {
     private _origin: THREE.Vector4[] = [];
     private _shape: THREE.Vector4[] = [];
     private _basis: THREE.Vector4[] = [];
+    /** Conservative render-space XZ rectangles for a cheap pre-loop reject. */
+    private _bounds: THREE.Vector4[] = [];
+
+    // Reused while converting the light-coordinate shadow volume into an XZ
+    // rectangle. Six casters x eight corners is tiny, but still runs per frame.
+    private _coordToWorld = new THREE.Matrix3();
+    private _coordCorner = new THREE.Vector3();
 
     private _pending: PendingCaster[] = [];
     private readonly _slots: number;
@@ -141,6 +148,8 @@ export class ProjectedShadows {
             this._origin.push(new THREE.Vector4(0, ProjectedShadows.PARKED_Y, 0, 0));
             this._shape.push(new THREE.Vector4(0, 0, 0, 0));
             this._basis.push(new THREE.Vector4(1, 0, 0, 1));
+            // min > max makes every finite fragment fail the bounds test.
+            this._bounds.push(new THREE.Vector4(1, 1, -1, -1));
         }
 
         const S = this._frame.S;
@@ -150,6 +159,7 @@ export class ProjectedShadows {
             uProjShadowOrigin: { value: this._origin },
             uProjShadowShape: { value: this._shape },
             uProjShadowBasis: { value: this._basis },
+            uProjShadowBounds: { value: this._bounds },
             uProjShadowSun: { value: new THREE.Vector3(S.x, S.y, S.z) },
             uProjShadowUy: { value: this._frame.U.y },
             uProjShadowGrid: { value: new THREE.Vector4(1, 1, 1, 1) },
@@ -301,6 +311,7 @@ uniform sampler2D uProjShadowAtlas;
 uniform vec4 uProjShadowOrigin[${count}];
 uniform vec4 uProjShadowShape[${count}];
 uniform vec4 uProjShadowBasis[${count}];
+uniform vec4 uProjShadowBounds[${count}];
 uniform vec3 uProjShadowSun;
 uniform float uProjShadowUy;
 uniform vec4 uProjShadowGrid;
@@ -342,6 +353,14 @@ float treeMaskFactor() {
 float projShadowFactor() {
     float occ = 0.0;
     for (int i = 0; i < ${count}; i++) {
+        // Most screen pixels are nowhere near this caster's narrow shadow
+        // volume. Reject them with four scalar comparisons before paying for
+        // three light-space dot products and the atlas-coordinate work below.
+        // Bounds are derived on the CPU from the SAME r/u/d ranges used here,
+        // so this cannot remove a valid shadow sample.
+        vec4 coarse = uProjShadowBounds[i];
+        if (vProjShadowWorld.x < coarse.x || vProjShadowWorld.z < coarse.y
+            || vProjShadowWorld.x > coarse.z || vProjShadowWorld.z > coarse.w) continue;
         vec4 origin = uProjShadowOrigin[i];
         // skip is an atlas-caster handle (stored in origin.w), not this
         // frame's live-slot index. Slots are distance-sorted every frame, so
@@ -455,12 +474,74 @@ void main() {`)
                 U.x * p.cos + U.z * p.sin,
                 -U.x * p.sin + U.z * p.cos,
             );
+            this._writeBounds(i, p.x, p.z);
         }
         // Park the rest below the world, where their enormous light-frame U
         // coordinate fails the bounds test before any texture fetch.
         for (let i = live; i < this._slots; i++) {
             this._origin[i].set(0, ProjectedShadows.PARKED_Y, 0, 0);
+            this._bounds[i].set(1, 1, -1, -1);
         }
+    }
+
+    /**
+     * Builds the exact XZ AABB of this slot's conservative shadow volume.
+     *
+     * The fragment shader maps `rel` to three linear coordinates: r, u and d.
+     * A fragment can contribute only while r/u are inside the atlas cell and d
+     * lies between the atlas-wide nearest possible surface and `fadeFar`.
+     * Inverting that same transform and projecting its eight box corners gives
+     * a rectangle containing every possible accepted fragment. Yaw is already
+     * folded into `_basis`, so turning cars stay covered without a guessed
+     * radius or quality-sensitive tuning value.
+     */
+    private _writeBounds(slot: number, originX: number, originZ: number): void {
+        if (this._atlas === null) return;
+        const basis = this._basis[slot];
+        const S = this._frame.S;
+        const transform = this._coordToWorld.set(
+            basis.x, 0, basis.y,
+            basis.z, this._frame.U.y, basis.w,
+            -S.x, -S.y, -S.z,
+        );
+
+        const determinant = transform.determinant();
+        if (Math.abs(determinant) < 1e-5) {
+            // Defensive only: normal vehicle yaw never makes this singular.
+            // A broad fallback preserves correctness if a future reskin does.
+            const radius = cfg.lighting.projectedShadows.fadeFar + 20;
+            this._bounds[slot].set(
+                originX - radius, originZ - radius,
+                originX + radius, originZ + radius,
+            );
+            return;
+        }
+        transform.invert();
+
+        const shape = this._shape[slot];
+        const r0 = shape.x, r1 = shape.x + 1 / shape.z;
+        const u0 = shape.y, u1 = shape.y + 1 / shape.w;
+        // The depth compare permits a 1.5cm tolerance before the captured
+        // nearest surface. Include it plus a little float/bilinear headroom.
+        const d0 = this._atlas.depthMin - 0.02;
+        const d1 = cfg.lighting.projectedShadows.fadeFar;
+        let minX = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxZ = -Infinity;
+
+        for (let corner = 0; corner < 8; corner++) {
+            this._coordCorner.set(
+                corner & 1 ? r1 : r0,
+                corner & 2 ? u1 : u0,
+                corner & 4 ? d1 : d0,
+            ).applyMatrix3(transform);
+            minX = Math.min(minX, originX + this._coordCorner.x);
+            minZ = Math.min(minZ, originZ + this._coordCorner.z);
+            maxX = Math.max(maxX, originX + this._coordCorner.x);
+            maxZ = Math.max(maxZ, originZ + this._coordCorner.z);
+        }
+
+        const pad = 0.05;
+        this._bounds[slot].set(minX - pad, minZ - pad, maxX + pad, maxZ + pad);
     }
 
     /** Live caster count last commit, for the perf HUD. */
