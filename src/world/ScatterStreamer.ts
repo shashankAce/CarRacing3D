@@ -26,6 +26,8 @@ interface Variant {
     frame: number;
     far: InstancedMesh3D;
     farBucket: Placement[];
+    /** Scratch bucket built this frame, swapped with `farBucket` after sorting. */
+    nextFarBucket: Placement[];
 }
 
 const _normal = { x: 0, y: 1, z: 0 };
@@ -72,6 +74,10 @@ export class ScatterStreamer {
     private _byChunk = new Map<number, Placement[]>();
     /** Reused per frame, one bucket per variant. */
     private _buckets: Placement[][] = [];
+    /** Scratch buckets let us detect whether GPU instance membership changed. */
+    private _nextBuckets: Placement[][] = [];
+    /** Travel value at which the current instance matrices were written. */
+    private _matrixAnchor = 0;
 
     private _matrix = new THREE.Matrix4();
     private _position = new THREE.Vector3();
@@ -128,6 +134,7 @@ export class ScatterStreamer {
             mesh.object3D.count = 0;
             this._meshes.push(mesh);
             this._buckets.push([]);
+            this._nextBuckets.push([]);
 
             // ── Distant tier for this variant ─────────────────────────────
             // One per variant, not one shared: each carries a baked image of
@@ -153,6 +160,7 @@ export class ScatterStreamer {
                 frame: impostorFrameSize(variant),
                 far,
                 farBucket: [],
+                nextFarBucket: [],
             });
         }
     }
@@ -274,12 +282,12 @@ export class ScatterStreamer {
         // render-space coordinates entirely.
         const viewerX = roadCenterX(travelled);
 
-        for (const bucket of this._buckets) bucket.length = 0;
-        for (const v of this._variants) v.farBucket.length = 0;
+        for (const bucket of this._nextBuckets) bucket.length = 0;
+        for (const v of this._variants) v.nextFarBucket.length = 0;
         let near = 0, far = 0;
         for (const list of this._byChunk.values()) {
             for (const p of list) {
-                const farBucket = this._variants[p.variant].farBucket;
+                const farBucket = this._variants[p.variant].nextFarBucket;
                 // TRUE distance, not depth ahead. What decides whether the swap
                 // is visible is the tree's angular size, i.e. height/distance —
                 // so `lodCrossover` should mean the same thing for a tree off to
@@ -289,7 +297,7 @@ export class ScatterStreamer {
                 const dx = p.x - viewerX;
                 const dz = p.z - travelled;
                 if (dx * dx + dz * dz < crossoverSq) {
-                    const bucket = this._buckets[p.variant];
+                    const bucket = this._nextBuckets[p.variant];
                     if (bucket.length < cfg.trees.maxPerVariant) {
                         bucket.push(p);
                         near++;
@@ -310,6 +318,27 @@ export class ScatterStreamer {
         }
         this._nearCount = near;
         this._farCount = far;
+
+        // Compare by placement identity and order. When both are unchanged the
+        // existing GPU buffers are already exact; every tree only needs the one
+        // shared Z translation applied below. Swap the arrays regardless so the
+        // freshly classified set becomes authoritative for shadows and stats.
+        let membershipChanged = false;
+        for (let v = 0; v < this._buckets.length; v++) {
+            if (!ScatterStreamer._samePlacements(this._buckets[v], this._nextBuckets[v])
+                || !ScatterStreamer._samePlacements(
+                    this._variants[v].farBucket,
+                    this._variants[v].nextFarBucket,
+                )) membershipChanged = true;
+        }
+        const previousBuckets = this._buckets;
+        this._buckets = this._nextBuckets;
+        this._nextBuckets = previousBuckets;
+        for (const variant of this._variants) {
+            const previous = variant.farBucket;
+            variant.farBucket = variant.nextFarBucket;
+            variant.nextFarBucket = previous;
+        }
 
         // Tree shadows into the mask, from the NEAR buckets only — for the same
         // reason as the decals: the far tier is billboards, and a shadow 200m out
@@ -341,10 +370,34 @@ export class ScatterStreamer {
             }
         }
 
+        if (membershipChanged) this._writeMatrices(travelled);
+        else this._scrollBatches(travelled - this._matrixAnchor);
+    }
+
+    reset(): void {
+        this._byChunk.clear();
+    }
+
+    /** True when two LOD buckets contain the same placements in the same order. */
+    private static _samePlacements(a: Placement[], b: Placement[]): boolean {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Rewrites instance matrices only when chunk/LOD membership changed.
+     * Matrices are anchored to the current travelled value to keep coordinates
+     * small over an infinite run; subsequent frames move each whole batch.
+     */
+    private _writeMatrices(travelled: number): void {
+        this._matrixAnchor = travelled;
         for (let v = 0; v < this._meshes.length; v++) {
-            const mesh = this._meshes[v];
             const bucket = this._buckets[v];
-            const obj = mesh.object3D;
+            const obj = this._meshes[v].object3D;
+            obj.position.z = 0;
             for (let i = 0; i < bucket.length; i++) {
                 const p = bucket[i];
                 this._position.set(p.x, p.y, travelled - p.z);
@@ -361,29 +414,32 @@ export class ScatterStreamer {
             obj.instanceMatrix.needsUpdate = true;
         }
 
-        // Billboards. The quad is sized to the SQUARE FRAME the impostor was
-        // baked in, not to the tree's own width and height — the bake used one
-        // square ortho frame for both axes, so using the tree's aspect here
-        // would stretch the image. Lifted by half the frame because a quad's
-        // origin is its centre while the geometry's is its base, and the bake
-        // was centred on the tree's mid-height.
+        // Billboards use the same anchor. Their quad is sized to the square
+        // frame used by the impostor bake, so the LOD switch changes only tris.
         this._quaternion.identity();
-        for (const v of this._variants) {
-            const farObj = v.far.object3D;
-            for (let i = 0; i < v.farBucket.length; i++) {
-                const p = v.farBucket[i];
-                const frame = v.frame * p.scale;
-                this._position.set(p.x, p.y + v.tree.height * 0.5 * p.scale, travelled - p.z);
+        for (const variant of this._variants) {
+            const obj = variant.far.object3D;
+            obj.position.z = 0;
+            for (let i = 0; i < variant.farBucket.length; i++) {
+                const p = variant.farBucket[i];
+                const frame = variant.frame * p.scale;
+                this._position.set(
+                    p.x,
+                    p.y + variant.tree.height * 0.5 * p.scale,
+                    travelled - p.z,
+                );
                 this._scaleVec.set(frame, frame, 1);
                 this._matrix.compose(this._position, this._quaternion, this._scaleVec);
-                farObj.setMatrixAt(i, this._matrix);
+                obj.setMatrixAt(i, this._matrix);
             }
-            farObj.count = v.farBucket.length;
-            farObj.instanceMatrix.needsUpdate = true;
+            obj.count = variant.farBucket.length;
+            obj.instanceMatrix.needsUpdate = true;
         }
     }
 
-    reset(): void {
-        this._byChunk.clear();
+    /** Moves every tree by one shared transform without touching GPU buffers. */
+    private _scrollBatches(renderZ: number): void {
+        for (const mesh of this._meshes) mesh.object3D.position.z = renderZ;
+        for (const variant of this._variants) variant.far.object3D.position.z = renderZ;
     }
 }

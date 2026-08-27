@@ -26,6 +26,10 @@ The original plan below is entirely implemented and confirmed in current
    light-space r/u/d volume. Fragments outside it skip the caster before the
    expensive dot products and atlas-coordinate work, without changing any
    accepted shadow sample.
+9. **Stop rewriting unchanged tree instance buffers** — done. Near and
+   billboard LOD buckets are compared by placement identity; while membership
+   is unchanged, all tree motion comes from one shared Z transform per batch.
+   Matrices upload only when a chunk or LOD crossing actually changes a bucket.
 
 The measurements and per-vehicle table below this line are from before that
 work and are now stale — the FBX draw-call counts (33-40/vehicle) no longer
