@@ -31,10 +31,10 @@ import { smoothstep } from './math';
  *     quarter of a frame, for a shading term that is inherently broad and
  *     smooth. On a 5m lattice it is 81 points × 5 steps = 405, roughly
  *     doubling the existing 361, and the result is bilinearly sampled at the
- *     vertices. `gridStep` MUST divide `chunkSize` exactly: that is what makes
- *     a chunk's edge lattice points land on the same world positions as its
- *     neighbour's, so both sides of a seam compute the identical value and
- *     there is no shading discontinuity to hide.
+ *     vertices. `gridStep` MUST divide `chunkWidth` AND `chunkLength` exactly:
+ *     that is what makes a chunk's edge lattice points land on the same world
+ *     positions as its neighbour's, so both sides of a seam compute the
+ *     identical value and there is no shading discontinuity to hide.
  *
  *  2. **Step distances ramp QUADRATICALLY,** not uniformly. Near the sample
  *     point a bump a metre high still occludes, so precision matters; 60m out
@@ -50,10 +50,12 @@ import { smoothstep } from './math';
  */
 
 export interface ShadeGrid {
-    /** Lattice points per edge. */
-    side: number;
-    /** Metres between lattice points. */
-    step: number;
+    /** Lattice points along X and Z — independent, since a chunk need not be square. */
+    sideX: number;
+    sideZ: number;
+    /** Metres between lattice points, per axis. */
+    stepX: number;
+    stepZ: number;
     /** Shade factor per lattice point: 1 fully lit, down to 1 - strength. */
     values: Float32Array;
 }
@@ -125,19 +127,24 @@ export function refreshTerrainShadow(): void {
 
 /** Allocates the lattice for one chunk. Reused across every build. */
 export function makeShadeGrid(): ShadeGrid {
-    const size = cfg.terrain.chunkSize;
+    const sizeX = cfg.terrain.chunkWidth, sizeZ = cfg.terrain.chunkLength;
     const step = cfg.terrain.selfShadow.gridStep;
-    const spans = Math.max(1, Math.round(size / step));
-    if (Math.abs(spans * step - size) > 1e-6) {
+    const spansX = Math.max(1, Math.round(sizeX / step));
+    const spansZ = Math.max(1, Math.round(sizeZ / step));
+    if (Math.abs(spansX * step - sizeX) > 1e-6 || Math.abs(spansZ * step - sizeZ) > 1e-6) {
         console.warn(
             `[terrainShadow] selfShadow.gridStep ${step} does not divide ` +
-            `terrain.chunkSize ${size}. Chunk edges will not share lattice ` +
-            'points with their neighbours and the terrain will show shading ' +
-            'seams. Pick a divisor of the chunk size.',
+            `terrain.chunkWidth ${sizeX} and/or terrain.chunkLength ${sizeZ} ` +
+            'evenly. Chunk edges will not share lattice points with their ' +
+            'neighbours and the terrain will show shading seams. Pick a ' +
+            'divisor of both.',
         );
     }
-    const side = spans + 1;
-    return { side, step: size / spans, values: new Float32Array(side * side) };
+    const sideX = spansX + 1, sideZ = spansZ + 1;
+    return {
+        sideX, sideZ, stepX: sizeX / spansX, stepZ: sizeZ / spansZ,
+        values: new Float32Array(sideX * sideZ),
+    };
 }
 
 /**
@@ -147,8 +154,8 @@ export function makeShadeGrid(): ShadeGrid {
 export function fillShadeGrid(originX: number, originZ: number, grid: ShadeGrid): void {
     if (!_initialised) refreshTerrainShadow();
 
-    const { side, step, values } = grid;
-    const count = side * side;
+    const { sideX, sideZ, stepX, stepZ, values } = grid;
+    const count = sideX * sideZ;
     if (!_active) { values.fill(1); return; }
 
     if (_base.length !== count) {
@@ -158,12 +165,12 @@ export function fillShadeGrid(originX: number, originZ: number, grid: ShadeGrid)
 
     // Pass 1: the unlit height at each lattice point, row by row so the road
     // terms hoist out of the x scan — same reason `fillChunkBuffers` does.
-    for (let j = 0; j < side; j++) {
-        const z = originZ + j * step;
+    for (let j = 0; j < sideZ; j++) {
+        const z = originZ + j * stepZ;
         heightRowAt(z, _row);
-        const rowBase = j * side;
-        for (let i = 0; i < side; i++) {
-            _base[rowBase + i] = heightInRow(originX + i * step, z, _row);
+        const rowBase = j * sideX;
+        for (let i = 0; i < sideX; i++) {
+            _base[rowBase + i] = heightInRow(originX + i * stepX, z, _row);
         }
     }
 
@@ -177,13 +184,13 @@ export function fillShadeGrid(originX: number, originZ: number, grid: ShadeGrid)
         const rayRise = _dist[k] * _tanElev;
         const invDist = 1 / _dist[k];
         const ox = _offX[k], oz = _offZ[k];
-        for (let j = 0; j < side; j++) {
-            const z = originZ + j * step + oz;
+        for (let j = 0; j < sideZ; j++) {
+            const z = originZ + j * stepZ + oz;
             heightRowAt(z, _row);
-            const rowBase = j * side;
-            for (let i = 0; i < side; i++) {
+            const rowBase = j * sideX;
+            for (let i = 0; i < sideX; i++) {
                 const idx = rowBase + i;
-                const h = heightInRow(originX + i * step + ox, z, _row);
+                const h = heightInRow(originX + i * stepX + ox, z, _row);
                 // How far the occluder stands above the light ray, per metre of
                 // distance to it — an angle, so `softness` is scale-free.
                 const excess = (h - _base[idx] - rayRise) * invDist;
@@ -204,18 +211,18 @@ export function fillShadeGrid(originX: number, originZ: number, grid: ShadeGrid)
  * height field was sampled at, not the mesh's negative local z.
  */
 export function shadeAt(grid: ShadeGrid, localX: number, localZ: number): number {
-    const { side, step, values } = grid;
-    const last = side - 1;
+    const { sideX, sideZ, stepX, stepZ, values } = grid;
+    const lastX = sideX - 1, lastZ = sideZ - 1;
 
-    const fx = localX / step, fz = localZ / step;
+    const fx = localX / stepX, fz = localZ / stepZ;
     let i0 = Math.floor(fx), j0 = Math.floor(fz);
-    if (i0 < 0) i0 = 0; else if (i0 > last) i0 = last;
-    if (j0 < 0) j0 = 0; else if (j0 > last) j0 = last;
-    const i1 = i0 < last ? i0 + 1 : last;
-    const j1 = j0 < last ? j0 + 1 : last;
+    if (i0 < 0) i0 = 0; else if (i0 > lastX) i0 = lastX;
+    if (j0 < 0) j0 = 0; else if (j0 > lastZ) j0 = lastZ;
+    const i1 = i0 < lastX ? i0 + 1 : lastX;
+    const j1 = j0 < lastZ ? j0 + 1 : lastZ;
     const tx = fx - i0, tz = fz - j0;
 
-    const near = values[j0 * side + i0] + (values[j0 * side + i1] - values[j0 * side + i0]) * tx;
-    const far = values[j1 * side + i0] + (values[j1 * side + i1] - values[j1 * side + i0]) * tx;
+    const near = values[j0 * sideX + i0] + (values[j0 * sideX + i1] - values[j0 * sideX + i0]) * tx;
+    const far = values[j1 * sideX + i0] + (values[j1 * sideX + i1] - values[j1 * sideX + i0]) * tx;
     return near + (far - near) * tz;
 }

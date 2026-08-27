@@ -47,14 +47,20 @@ export class GameState {
     get isRunning(): boolean { return this.phase === RunPhase.RUNNING; }
 
     /**
-     * @param throttle +1 gas, -1 manual brake, 0 automatic brake.
+     * @param throttle +1 gas/forward, -1 brake/reverse, 0 coast toward rest.
      */
     update(dt: number, throttle: number): void {
         const s = cfg.speed;
         const rate = throttle > 0 ? s.accelerate
             : throttle < 0 ? -s.brake
-            : -s.autoBrake;
-        this.speed = Math.max(s.min, Math.min(s.max, this.speed + rate * dt));
+            // Release always settles at zero. Applying a fixed negative rate
+            // here made a reversed QA car keep accelerating backwards.
+            : -Math.sign(this.speed) * s.autoBrake;
+        let nextSpeed = this.speed + rate * dt;
+        // Do not overshoot rest while coasting, or a small positive/negative
+        // speed would flip signs every frame and make the world visibly jitter.
+        if (throttle === 0 && this.speed * nextSpeed < 0) nextSpeed = 0;
+        this.speed = Math.max(s.min, Math.min(s.max, nextSpeed));
         this.scroll.advance(this.speed * dt);
 
         // Burns on time, not distance — that's what makes speed worth having.

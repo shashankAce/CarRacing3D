@@ -16,7 +16,7 @@ import { gameConfig as cfg } from '../config/gameConfig';
  * Lateral centre of the road at absolute world Z.
  *
  * NOTE ON FREQUENCY: a wavelength is 2π/frequency, and it has to be comfortably
- * SHORTER than the visible road (`terrain.chunkSize * terrain.chunksAhead`) or
+ * SHORTER than the visible road (`terrain.chunkLength * terrain.chunksAhead`) or
  * the bend can't be perceived — you see a fraction of one wave, which reads as
  * a dead-straight road drifting sideways. At 0.004 the wavelength was 1571m
  * against ~200m of visible road, and it looked perfectly straight.

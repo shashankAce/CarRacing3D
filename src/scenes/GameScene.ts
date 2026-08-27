@@ -11,7 +11,6 @@ import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
 import { ScatterStreamer } from '../world/ScatterStreamer';
 import { RoadMesh } from '../world/RoadMesh';
-import { ShadowDecals } from '../world/ShadowDecals';
 import { ProjectedShadows } from '../world/ProjectedShadows';
 import { TreeShadowMask } from '../world/TreeShadowMask';
 import { TouchControls } from '../ui/TouchControls';
@@ -52,7 +51,6 @@ export class GameScene extends Scene {
     private _markers: RoadMarkers;
     private _terrain: TerrainStreamer;
     private _road: RoadMesh;
-    private _shadows: ShadowDecals;
     private _projected: ProjectedShadows;
     private _treeMask: TreeShadowMask | null = null;
     /** Kept from `onRendererReady` so the tree mask can be rendered each frame. */
@@ -87,22 +85,12 @@ export class GameScene extends Scene {
         // The renderer is created lazily on the first frame, so this callback
         // is the only correct place to configure it.
         sys.onRendererReady = (renderer) => {
-            renderer.shadowMap.enabled = cfg.lighting.shadows.enabled;
-            // Basic PCF rather than PCFSoft: soft shadows cost noticeably more
-            // fill on a low-end phone, and at this camera distance the extra
-            // edge quality is close to invisible. Swap if a reskin targets
-            // better hardware.
-            renderer.shadowMap.type = THREE.PCFShadowMap;
-
             // Distant trees are billboards carrying a baked image of their own
             // mesh. Baking needs a renderer, and the engine creates one lazily
             // on the first frame — this callback is the earliest point it
             // exists. Until then the far tier is invisible rather than
             // untextured.
             this._scatter.bakeImpostors(renderer as THREE.WebGLRenderer);
-            // Shadow silhouettes are baked from the light's point of view, so
-            // they need the renderer too, and must exist before the first frame.
-            this._shadows.bake(renderer as THREE.WebGLRenderer);
             // The silhouette atlas: one render per caster type, once, then the
             // receiver shaders sample it forever. Must exist before the first
             // frame or receivers read a null sampler.
@@ -148,24 +136,13 @@ export class GameScene extends Scene {
         this._scatter = new ScatterStreamer(this, this._state.scroll);
         this._terrain.buildAllNow();
         this._road.update();
-        // Built before the first scatter sync, since the scatter loop feeds it.
-        this._shadows = new ShadowDecals(this);
         // Registered before the first scatter sync, which is what feeds it.
         this._scatter.setTreeShadowMask(this._treeMask);
-        this._scatter.setShadowDecals(
-            cfg.lighting.bakedShadows.enabled && cfg.lighting.bakedShadows.includeTrees
-                ? this._shadows : null);
         this._syncScatter();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
         this._traffic.deactivate();
-        if (cfg.lighting.bakedShadows.enabled) {
-            // Registration only records geometry; the silhouettes are
-            // render-target renders, baked in `onRendererReady` above.
-            this._traffic.registerShadows(this._shadows);
-            this._car.registerShadow(this._shadows);
-        }
 
         if (cfg.lighting.projectedShadows.enabled) {
             // Casters first: `register` assigns the handles the receiver
@@ -184,24 +161,14 @@ export class GameScene extends Scene {
             for (const material of this._markers.materials) {
                 this._projected.attach(material, { groundMask: true });
             }
-            // Vehicles DO take the mask, but with `maskLift` — the lookup is
-            // unprojected along the light first, so a raised or vertical surface
-            // reads the ground point its light ray actually came over rather
-            // than the one beneath it.
-            for (const material of this._traffic.receiverMaterials) {
-                this._projected.attach(material, { groundMask: true, maskLift: true });
-            }
-            // The car receives everything EXCEPT itself. With no depth test its
-            // own silhouette would darken its whole down-light half on top of
-            // what N.L already does, which reads as a smear rather than as
-            // self-shadowing.
-            for (const material of this._car.receiverMaterials) {
-                this._projected.attach(material, {
-                    skip: this._car.projectedHandle,
-                    groundMask: true,
-                    maskLift: true,
-                });
-            }
+            // Vehicle receivers (traffic and the car) are NOT attached here —
+            // their materials don't exist yet. Both are FBX-derived and created
+            // asynchronously (`_attachTrafficMaterials`/`_attachPlayerMaterials`,
+            // called from `_loadVehicleModels`/`_selectCar` once the real
+            // materials exist). Attaching against the empty arrays this early
+            // used to silently patch nothing — vehicles never received a
+            // projected shadow at all, cast or received didn't matter, `attach`
+            // simply had zero materials to iterate.
         }
         this._hud = new Hud(this);
         this._hud.setVisible(false);
@@ -226,16 +193,6 @@ export class GameScene extends Scene {
         void this._loadVehicleModels();
     }
 
-    /**
-     * Half-extent of the orthographic shadow camera, from the reach pair. Both
-     * `_buildLights` and `_updateSun` need it and must agree, so it is derived
-     * in one place.
-     */
-    private _shadowRadius(): number {
-        const sh = cfg.lighting.shadows;
-        return (sh.reachAhead + sh.reachBehind) * 0.5;
-    }
-
     private _buildLights(): void {
         const ambNode = new Node();
         const amb = ambNode.addComponent(AmbientLight3D);
@@ -250,46 +207,19 @@ export class GameScene extends Scene {
         this.addChild(sunNode);
         this._sun = sun;
 
-        const sh = cfg.lighting.shadows;
-        if (sh.enabled) {
-            // Shadow config isn't schema-exposed on the wrapper — this is the
-            // documented raw-THREE escape hatch.
-            const light = sun.light;
-            light.castShadow = true;
-            light.shadow.mapSize.set(sh.mapSize, sh.mapSize);
-            // A directional light's shadow camera is orthographic; these bounds
-            // are what the map's texels are spread across.
-            const cam = light.shadow.camera;
-            const radius = this._shadowRadius();
-            cam.left = -radius;
-            cam.right = radius;
-            cam.top = radius;
-            cam.bottom = -radius;
-            // The light has to sit OUTSIDE the box it is shadowing, or geometry
-            // between it and `near` is clipped out of the depth pass and simply
-            // stops casting. Cheap to check, silent and baffling if wrong.
-            if (cfg.lighting.sunDistance <= radius) {
-                console.warn(
-                    `[shadows] sunDistance ${cfg.lighting.sunDistance} is inside the `
-                    + `${radius.toFixed(0)}m shadow radius; casters near the light will drop out.`,
-                );
-            }
-            cam.near = sh.near;
-            cam.far = sh.far;
-            cam.updateProjectionMatrix();
-            light.shadow.bias = sh.bias;
-            light.shadow.normalBias = sh.normalBias;
-        }
         this._updateSun();
     }
 
     /**
-     * Keeps the sun — and therefore the shadow frustum — over the car.
+     * Keeps the sun positioned over the car.
      *
-     * A directional light's shadow map covers only the box its orthographic
-     * camera sees, so a fixed light would drop shadows entirely a few tens of
-     * metres into an infinite run. The target leads the car slightly, since the
-     * road ahead is what the player is looking at.
+     * A directional light's illumination direction is fully determined by
+     * `position - target.position`, independent of where that vector actually
+     * sits in the world — nothing besides that direction is read from this
+     * light elsewhere (real-time shadow maps, the one consumer that cared
+     * about the light's absolute position and box framing, are gone). Kept
+     * tracking the car anyway since it costs nothing and keeps the light's
+     * gizmo sane if it's ever inspected.
      */
     private _updateSun(): void {
         const d = cfg.lighting.sunDirection;
@@ -297,16 +227,13 @@ export class GameScene extends Scene {
         const dist = cfg.lighting.sunDistance;
         const carX = this._car ? this._car.position.x : 0;
         const carY = this._car ? this._car.position.y : 0;
-        // Box centre, derived so it spans reachBehind..reachAhead about the car
-        // rather than sitting symmetrically and wasting half of itself behind.
-        const sh = cfg.lighting.shadows;
-        const focusZ = (sh.reachBehind - sh.reachAhead) * 0.5;
+        const carZ = this._car ? this._car.position.z : 0;
 
-        this._sun.target.position.set(carX, carY, focusZ);
+        this._sun.target.position.set(carX, carY, carZ);
         this._sun.position.set(
             carX + (d.x / len) * dist,
             carY + (d.y / len) * dist,
-            focusZ + (d.z / len) * dist,
+            carZ + (d.z / len) * dist,
         );
     }
 
@@ -349,10 +276,6 @@ export class GameScene extends Scene {
             // so nothing is ever a frame behind what the player is looking at.
             this._terrain.update();
             this._road.update();
-            // Decals are rebuilt each frame around the scatter sync, which is
-            // what pushes the tree ones -- so begin() has to come first and
-            // commit() after everything has contributed.
-            this._shadows.begin();
             // Opened BEFORE the scatter sync, which is what pushes the trees.
             this._treeMask?.begin(this._car.position.x);
             // The car's own y is the road surface under it (the wheels rest on
@@ -360,11 +283,6 @@ export class GameScene extends Scene {
             // measured from.
             this._projected.setTreeMaskPlane(this._car.position.y);
             this._syncScatter();
-            if (cfg.lighting.bakedShadows.enabled) {
-                this._traffic.addShadows(this._shadows, travelled);
-                this._car.addShadow(this._shadows, travelled);
-            }
-            this._shadows.commit();
 
             // Projected shadows are pure uniform writes — no geometry, no
             // render target — so this is just "collect the casters, keep the

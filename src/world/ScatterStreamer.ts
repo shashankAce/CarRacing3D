@@ -7,11 +7,7 @@ import { heightAt, normalAt } from '../procedural/heightField';
 import { roadCenterX } from './roadPath';
 import { mulberry32, hashChunk } from '../procedural/random';
 import type { WorldScroll } from './WorldScroll';
-import type { ShadowDecals } from './ShadowDecals';
 import type { TreeShadowMask } from './TreeShadowMask';
-
-/** Reused by placement generation — allocation-free, same reason as `normalAt`. */
-const scratchNormal = { x: 0, y: 1, z: 0 };
 
 interface Placement {
     x: number;
@@ -21,15 +17,6 @@ interface Placement {
     rotationY: number;
     scale: number;
     variant: number;
-    /**
-     * Ground normal at the trunk, in WORLD space, sampled once at placement.
-     * Stored rather than sampled per frame because `normalAt` is four `heightAt`
-     * calls and placements are cached per chunk — so this costs nothing after the
-     * chunk is built, and shadow decals need it every frame to lie in the slope.
-     */
-    nx: number;
-    ny: number;
-    nz: number;
 }
 
 /** A variant's mesh plus the billboard that stands in for it at distance. */
@@ -93,29 +80,17 @@ export class ScatterStreamer {
     private _scaleVec = new THREE.Vector3();
 
     /** Diagnostics for the perf HUD: near geometry + far billboards. */
-    /** Set by GameScene when baked shadows are in use. */
-    private _decals: ShadowDecals | null = null;
-    private _shadowHandles: number[] = [];
-
     private _treeMask: TreeShadowMask | null = null;
     private _maskHandles: number[] = [];
 
     /**
-     * Wires up the top-down tree shadow mask. One silhouette per variant, same
-     * as the decal path — each tree keeps its own trunk and canopy shape.
+     * Wires up the top-down tree shadow mask. One silhouette per variant, so
+     * each tree keeps its own trunk and canopy shape.
      */
     setTreeShadowMask(mask: TreeShadowMask | null): void {
         this._treeMask = mask;
         if (!mask) return;
         this._maskHandles = this._variants.map(v => mask.register(v.tree.geometry));
-    }
-
-    setShadowDecals(decals: ShadowDecals | null): void {
-        this._decals = decals;
-        if (!decals) return;
-        // One silhouette per tree variant, so each keeps its own trunk and
-        // canopy shape rather than sharing a generic blob.
-        this._shadowHandles = this._variants.map(v => decals.register(v.tree.geometry));
     }
 
     private _nearCount = 0;
@@ -145,7 +120,6 @@ export class ScatterStreamer {
             mesh.geometry = variant.geometry;
             mesh.material = material;
             mesh.count = cfg.trees.maxPerVariant;
-            mesh.castShadow = cfg.lighting.shadows.enabled;
             scene.addChild(node);
             // Instances sit far from the geometry's local origin, so the default
             // bounding sphere doesn't cover them and the batch would be culled
@@ -170,10 +144,6 @@ export class ScatterStreamer {
                 transparent: false, alphaTest: 0.5, visible: false,
             });
             far.count = cfg.trees.maxFarInstances;
-            // Billboards don't cast: a flat quad standing in for a 3D shape
-            // casts a rectangle, and at this distance no shadow beats a wrong
-            // one.
-            far.castShadow = false;
             scene.addChild(farNode);
             far.object3D.frustumCulled = false;
             far.object3D.count = 0;
@@ -229,17 +199,17 @@ export class ScatterStreamer {
     /** Generates one chunk's placements. Pure in (cx, cz). */
     private _placementsFor(cx: number, cz: number): Placement[] {
         const t = cfg.trees;
-        const size = cfg.terrain.chunkSize;
+        const sizeX = cfg.terrain.chunkWidth, sizeZ = cfg.terrain.chunkLength;
         const rand = mulberry32(hashChunk(cx, cz, 0x7ee5));
         const out: Placement[] = [];
 
-        for (let gz = 0; gz < size; gz += t.spacing) {
-            for (let gx = 0; gx < size; gx += t.spacing) {
+        for (let gz = 0; gz < sizeZ; gz += t.spacing) {
+            for (let gx = 0; gx < sizeX; gx += t.spacing) {
                 // Jittered grid: direct control of average density without the
                 // visible regularity of a plain grid or the clumping of pure
                 // random placement.
-                const x = cx * size + gx + t.spacing * (0.5 + (rand() - 0.5) * 0.8);
-                const z = cz * size + gz + t.spacing * (0.5 + (rand() - 0.5) * 0.8);
+                const x = cx * sizeX + gx + t.spacing * (0.5 + (rand() - 0.5) * 0.8);
+                const z = cz * sizeZ + gz + t.spacing * (0.5 + (rand() - 0.5) * 0.8);
                 const variant = Math.floor(rand() * t.variants);
                 const rotationY = rand() * Math.PI * 2;
                 const scale = 0.8 + rand() * 0.45;
@@ -251,10 +221,8 @@ export class ScatterStreamer {
                 // normalY falls as the ground steepens; reject cliffs.
                 if (_normal.y < 1 / Math.sqrt(1 + t.maxSlope * t.maxSlope)) continue;
 
-                normalAt(x, z, scratchNormal);
                 out.push({
                     x, z, y: heightAt(x, z) - t.sinkDepth, rotationY, scale, variant,
-                    nx: scratchNormal.x, ny: scratchNormal.y, nz: scratchNormal.z,
                 });
             }
         }
@@ -278,7 +246,7 @@ export class ScatterStreamer {
         // distant tree two triangles; it existed to stop geometry being spent on
         // fog-hidden smudges, which is only a concern if the crossover moves out
         // far enough that far chunks hold real geometry again.
-        const baseCz = Math.floor(this._scroll.travelled / cfg.terrain.chunkSize);
+        const baseCz = Math.floor(this._scroll.travelled / cfg.terrain.chunkLength);
         const maxCz = baseCz + cfg.trees.maxChunksAhead;
 
         const seen = new Set<number>();
@@ -343,40 +311,21 @@ export class ScatterStreamer {
         this._nearCount = near;
         this._farCount = far;
 
-        // Tree decals, from the NEAR buckets only. The far tier is billboards,
-        // which could not cast a shadow map either -- and a shadow under a
-        // 200m-distant tree is well past where fog has erased it.
-        if (this._decals) {
-            for (let v = 0; v < this._buckets.length; v++) {
-                const variant = this._variants[v];
-                const handle = this._shadowHandles[v];
-                for (const p of this._buckets[v]) {
-                    this._decals.add(
-                        handle,
-                        p.x,
-                        // `p.y` is the terrain height MINUS `trees.sinkDepth`, so
-                        // the trunk grows out of the ground rather than onto it.
-                        // Adding it back recovers the actual surface — without
-                        // this the decal sits 0.19m underground and never draws,
-                        // which is exactly how it first shipped.
-                        p.y + cfg.trees.sinkDepth,
-                        travelled - p.z,
-                        p.scale,
-                        // Render space mirrors Z, so the stored WORLD normal's z
-                        // flips with it.
-                        p.nx, p.ny, -p.nz,
-                    );
-                }
-            }
-        }
-
         // Tree shadows into the mask, from the NEAR buckets only — for the same
         // reason as the decals: the far tier is billboards, and a shadow 200m out
         // is behind 92% fog.
+        //
+        // Further limited to the roadside treeline: `maxRoadDistance` from
+        // `roadCenterX` at the TREE's own z (the road curves, so this is not the
+        // viewer's road position) — trees back in the background scatter never
+        // throw a shadow onto ground the camera can see, so they're skipped
+        // before `add`'s per-instance vector math rather than after.
         if (this._treeMask) {
+            const maxRoadDistance = cfg.lighting.treeShadows.maxRoadDistance;
             for (let v = 0; v < this._buckets.length; v++) {
                 const handle = this._maskHandles[v];
                 for (const p of this._buckets[v]) {
+                    if (Math.abs(p.x - roadCenterX(p.z)) > maxRoadDistance) continue;
                     this._treeMask.add(
                         handle,
                         p.x,

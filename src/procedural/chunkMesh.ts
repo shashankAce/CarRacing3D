@@ -108,12 +108,12 @@ let _shade: ShadeGrid | null = null;
 
 /**
  * Fills one chunk's vertex data. `cx`/`cz` are chunk grid coordinates; the
- * chunk covers world X `[cx*size, (cx+1)*size]` and world Z
- * `[cz*size, (cz+1)*size]`.
+ * chunk covers world X `[cx*chunkWidth, (cx+1)*chunkWidth]` and world Z
+ * `[cz*chunkLength, (cz+1)*chunkLength]`.
  *
  * Positions are LOCAL to the chunk — the caller places the mesh at
- * `(cx*size, 0, travelled - cz*size)`, which is what turns a fixed local mesh
- * into the right spot in a scrolling world.
+ * `(cx*chunkWidth, 0, travelled - cz*chunkLength)`, which is what turns a
+ * fixed local mesh into the right spot in a scrolling world.
  */
 export function fillChunkBuffers(
     cx: number,
@@ -124,10 +124,13 @@ export function fillChunkBuffers(
     uvs: Float32Array,
     colors: Float32Array,
 ): void {
-    const size = cfg.terrain.chunkSize;
+    const sizeX = cfg.terrain.chunkWidth, sizeZ = cfg.terrain.chunkLength;
     const segs = res - 1;
-    const step = size / segs;
-    const originX = cx * size, originZ = cz * size;
+    // Independent per axis — a chunk need not be square. The grid still has
+    // the same VERTEX COUNT (res x res) on both axes; only the world-space
+    // distance each step covers differs.
+    const stepX = sizeX / segs, stepZ = sizeZ / segs;
+    const originX = cx * sizeX, originZ = cz * sizeZ;
     const perimeter = perimeterIndices(res);
     const skirtDepth = cfg.terrain.skirtDepth;
 
@@ -143,12 +146,12 @@ export function fillChunkBuffers(
     const heights = _heights;
 
     for (let j = 0; j < side; j++) {
-        const worldZ = originZ + (j - 1) * step;
+        const worldZ = originZ + (j - 1) * stepZ;
         // Road terms depend only on z — hoisted out of the x scan.
         heightRowAt(worldZ, _row);
         const rowBase = j * side;
         for (let i = 0; i < side; i++) {
-            heights[rowBase + i] = heightInRow(originX + (i - 1) * step, worldZ, _row);
+            heights[rowBase + i] = heightInRow(originX + (i - 1) * stepX, worldZ, _row);
         }
     }
 
@@ -161,19 +164,24 @@ export function fillChunkBuffers(
     fillShadeGrid(originX, originZ, shade);
 
     // ── Pass 2: write vertices, differencing the grid for normals ─────────
-    const invTwoStep = 1 / (2 * step);
+    // Separate divisors per axis: the `heights` grid steps X and Z at
+    // `stepX`/`stepZ` respectively, so a non-square chunk needs a non-square
+    // gradient — using one shared divisor here would scale the X or Z slope
+    // wrong on any chunk where they differ, tilting every normal.
+    const invTwoStepX = 1 / (2 * stepX);
+    const invTwoStepZ = 1 / (2 * stepZ);
     let pi = 0, ni = 0, ui = 0, ci = 0;
     for (let j = 0; j < res; j++) {
-        const localZ = j * step;
+        const localZ = j * stepZ;
         const worldZ = originZ + localZ;
         const rowBase = (j + 1) * side;
         for (let i = 0; i < res; i++) {
-            const localX = i * step;
+            const localX = i * stepX;
             const idx = rowBase + i + 1;
             const h = heights[idx];
 
-            const dx = (heights[idx + 1] - heights[idx - 1]) * invTwoStep;
-            const dZ = (heights[idx + side] - heights[idx - side]) * invTwoStep;
+            const dx = (heights[idx + 1] - heights[idx - 1]) * invTwoStepX;
+            const dZ = (heights[idx + side] - heights[idx - side]) * invTwoStepZ;
             const len = Math.sqrt(dx * dx + 1 + dZ * dZ);
             // The normal is in the chunk's LOCAL frame, whose z is mirrored
             // (local z = -(worldZ - originZ)). Mirroring an axis flips that

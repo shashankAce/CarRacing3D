@@ -101,8 +101,6 @@ export class VehicleModels {
             if (!geometry) continue;
             const material = this._createMaterial(key);
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = cfg.lighting.shadows.enabled;
-            mesh.receiveShadow = true;
             root.add(mesh);
             materials.push(material);
         }
@@ -115,8 +113,6 @@ export class VehicleModels {
         if (this._testWheel && template.wheels.length > 0) {
             const material = this._createMaterial('Wheel');
             const wheels = new THREE.InstancedMesh(this._testWheel, material, template.wheels.length);
-            wheels.castShadow = cfg.lighting.shadows.enabled;
-            wheels.receiveShadow = true;
             root.add(wheels);
             materials.push(material);
 

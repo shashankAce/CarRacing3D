@@ -3,7 +3,6 @@ import { Node, Group3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadHeadingAt } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
-import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
 import type { VehicleModels } from '../assets/VehicleModels';
 
@@ -84,7 +83,6 @@ export interface TrafficVehicle {
 export class TrafficSystem {
 
     private _pool: TrafficVehicle[] = [];
-    private _shadowHandles: number[] = [];
     private _materials: THREE.Material[] = [];
     /** Materials grouped by caster type, for type-level projected self-skip. */
     private _materialsByType: THREE.Material[][] = [];
@@ -230,6 +228,19 @@ export class TrafficSystem {
      */
     update(dt: number, travelled: number, speedT: number, playerX: number): void {
         this._blinkClock += dt;
+
+        // QA mode: retain the seeded traffic at its absolute world positions so
+        // the player can approach it from either side and inspect shadows.
+        // The objects still get placed in render space as the player moves; only
+        // their driving AI, wheel spin, despawn and replacement spawning pause.
+        if (cfg.traffic.frozen) {
+            for (const v of this._pool) {
+                if (!v.active) continue;
+                this._place(v, travelled);
+                this._updateLod(v, playerX);
+            }
+            return;
+        }
 
         for (const v of this._pool) {
             if (!v.active) continue;
@@ -467,29 +478,6 @@ export class TrafficSystem {
     }
 
     private _projectedHandles: number[] = [];
-
-    registerShadows(decals: ShadowDecals): void {
-        this._shadowHandles = cfg.traffic.types.map(type =>
-            decals.register(new THREE.BoxGeometry(type.width, type.height, type.length)
-                .translate(0, type.height / 2, 0)));
-    }
-
-    addShadows(decals: ShadowDecals, travelled: number): void {
-        for (const v of this._pool) {
-            if (!v.active) continue;
-            const obj = v.group.object3D;
-            // World up rather than the road's normal: the road is a near-flat
-            // ribbon, and its pitch is gentle enough that the tilt is not worth
-            // a per-vehicle sample.
-            decals.add(
-                this._shadowHandles[v.type],
-                obj.position.x,
-                surfaceHeightAt(obj.position.x, travelled - obj.position.z),
-                obj.position.z,
-                1,
-            );
-        }
-    }
 
     /** Drivable height beneath a yawed point on a vehicle's local footprint. */
     private _heightAtLocal(

@@ -37,21 +37,6 @@ import * as THREE from 'three';
  * bounds and the silhouette both come out of the mesh.
  */
 
-export interface ShadowSilhouette {
-    /** RGB is black; the shape is in alpha. */
-    texture: THREE.Texture;
-    /** World extent across the light, metres — the quad's width. */
-    width: number;
-    /**
-     * World extent along the light's U axis, metres. Multiply by 1/sin(elevation)
-     * to get the ground length.
-     */
-    height: number;
-    /** Offsets of the silhouette's centre from the caster's origin, in R/U units. */
-    offsetR: number;
-    offsetU: number;
-}
-
 /**
  * The light's frame. Returned separately because the decal placement needs the
  * same vectors the bake used, and deriving them twice invites a sign error.
@@ -135,7 +120,7 @@ export interface ShadowAtlas {
     heightScale: number;
     /**
      * The green channel encodes the nearest caster surface along the light ray.
-     * Reconstruct with `depthMin + (1 - green) * depthInvSpan`.
+     * Reconstruct with `depthMin + (1 - green) / depthInvSpan`.
      *
      * `depth` means `-dot(position, S)`: larger is farther down-light. Storing
      * the nearest (smallest) value lets receivers reject the part of an atlas
@@ -337,80 +322,4 @@ export function bakeShadowAtlas(
     material.dispose();
 
     return { texture: target.texture, target, cols, rows, cells, heightScale, depthMin, depthInvSpan };
-}
-
-/**
- * Renders `geometry` to a silhouette from the light's point of view.
- *
- * The material is flat black on a target cleared to transparent, so coverage
- * lands in alpha and the decal can use the result as a plain `map`.
- */
-export function bakeShadowSilhouette(
-    renderer: THREE.WebGLRenderer,
-    geometries: THREE.BufferGeometry[],
-    frame: ReturnType<typeof lightFrame>,
-    size: number,
-): ShadowSilhouette {
-    // Several geometries are rendered as separate meshes rather than merged.
-    // Merging would need them to agree on attributes — the project's own
-    // `mergeGeometries` requires vertex colours, which a BoxGeometry has none of
-    // — and the silhouette only ever needs position, so there is nothing to gain.
-    const bounds = silhouetteBounds(geometries, frame);
-    const rMin = bounds.rMin, rMax = bounds.rMax, uMin = bounds.uMin, uMax = bounds.uMax;
-
-    const target = new THREE.WebGLRenderTarget(size, size, {
-        format: THREE.RGBAFormat,
-        generateMipmaps: true,
-        minFilter: THREE.LinearMipmapLinearFilter,
-        magFilter: THREE.LinearFilter,
-        // Deliberately no colorSpace: three.js forces the working (linear) space
-        // when rendering to a non-XR target and ignores the texture's own, so
-        // declaring sRGB would decode values that were never encoded. The default
-        // makes the round trip consistent. See ARCHITECTURE.md gotcha 15.
-    });
-
-    const scene = new THREE.Scene();
-    const material = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    for (const geometry of geometries) scene.add(new THREE.Mesh(geometry, material));
-
-    // Orthographic, looking ALONG the light with `up` = U, so image x maps to R
-    // and image y maps to U — which is what makes the ground transform a plain
-    // scale and rotate.
-    const camera = new THREE.OrthographicCamera(rMin, rMax, uMax, uMin, 0.01, 1000);
-    const centre = new THREE.Vector3()
-        .addScaledVector(frame.R, (rMin + rMax) * 0.5)
-        .addScaledVector(frame.U, (uMin + uMax) * 0.5);
-    camera.position.copy(centre).addScaledVector(frame.S, 100);
-    camera.up.copy(frame.U);
-    camera.lookAt(centre);
-    // The frustum is already centred on the geometry, so shift it back to the
-    // camera's own axes rather than double-offsetting.
-    camera.left = rMin - (rMin + rMax) * 0.5;
-    camera.right = rMax - (rMin + rMax) * 0.5;
-    camera.bottom = uMin - (uMin + uMax) * 0.5;
-    camera.top = uMax - (uMin + uMax) * 0.5;
-    camera.updateProjectionMatrix();
-
-    const prevTarget = renderer.getRenderTarget();
-    const prevClear = new THREE.Color();
-    renderer.getClearColor(prevClear);
-    const prevAlpha = renderer.getClearAlpha();
-
-    renderer.setRenderTarget(target);
-    renderer.setClearColor(0x000000, 0);
-    renderer.clear(true, true, false);
-    renderer.render(scene, camera);
-
-    renderer.setRenderTarget(prevTarget);
-    renderer.setClearColor(prevClear, prevAlpha);
-
-    material.dispose();
-
-    return {
-        texture: target.texture,
-        width: rMax - rMin,
-        height: uMax - uMin,
-        offsetR: (rMin + rMax) * 0.5,
-        offsetU: (uMin + uMax) * 0.5,
-    };
 }

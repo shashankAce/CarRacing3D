@@ -29,28 +29,32 @@ function octave(u: number, v: number): number {
 }
 
 /**
- * Spacing between terrain vertices — the chunk grid's resolution in metres.
+ * Spacing between terrain vertices ACROSS the road — the chunk grid's lateral
+ * (X) resolution in metres. What matters for `FLAT_MARGIN` below is the
+ * lateral step specifically: the road corridor's edge is crossed by walking
+ * in X, not Z, so `chunkLength` (which can now differ from `chunkWidth`) is
+ * irrelevant here.
  */
-const VERTEX_SPACING = cfg.terrain.chunkSize / (cfg.terrain.resolution - 1);
+const VERTEX_SPACING_X = cfg.terrain.chunkWidth / (cfg.terrain.resolution - 1);
 
 /**
  * How far past the visible asphalt the terrain stays perfectly flat.
  *
  * This is not cosmetic padding, it's a correctness requirement. The terrain is
- * a triangle mesh sampled on a `VERTEX_SPACING` grid, and the road ribbon is a
- * separate flat strip only `road.halfWidth` wide. If the shoulder starts rising
- * exactly at `halfWidth`, a triangle can have one vertex inside the corridor at
- * road level and the next one already lifted, and linear interpolation across
- * that triangle carries the terrain OVER the road edge — measured at up to 84cm
- * above the asphalt, which reads as the ground swallowing the road in a
- * staircase stepped at the grid spacing.
+ * a triangle mesh sampled on a `VERTEX_SPACING_X` grid, and the road ribbon is
+ * a separate flat strip only `road.halfWidth` wide. If the shoulder starts
+ * rising exactly at `halfWidth`, a triangle can have one vertex inside the
+ * corridor at road level and the next one already lifted, and linear
+ * interpolation across that triangle carries the terrain OVER the road edge —
+ * measured at up to 84cm above the asphalt, which reads as the ground
+ * swallowing the road in a staircase stepped at the grid spacing.
  *
  * Holding the corridor flat for more than one full vertex spacing guarantees
  * both ends of any triangle crossing the road edge are at road level, so it
  * can't tilt. Derived from the grid rather than hardcoded, so it stays correct
- * if `chunkSize` or `resolution` change.
+ * if `chunkWidth` or `resolution` change.
  */
-const FLAT_MARGIN = VERTEX_SPACING * 1.5;
+const FLAT_MARGIN = VERTEX_SPACING_X * 1.5;
 
 /** Half-width of the flattened corridor, i.e. the asphalt plus that margin. */
 const CORRIDOR_HALF_WIDTH = cfg.road.halfWidth + FLAT_MARGIN;

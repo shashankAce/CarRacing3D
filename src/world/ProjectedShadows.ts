@@ -153,8 +153,9 @@ export class ProjectedShadows {
             uProjShadowSun: { value: new THREE.Vector3(S.x, S.y, S.z) },
             uProjShadowUy: { value: this._frame.U.y },
             uProjShadowGrid: { value: new THREE.Vector4(1, 1, 1, 1) },
-            // x = atlas-wide depth minimum; y = reciprocal depth span. Atlas
-            // green uses the inverted encoding documented in ShadowAtlas.
+            // x = atlas-wide depth minimum; y = depth span in metres. Atlas
+            // green was ENCODED with the reciprocal span, but reconstructing
+            // metres in the receiver needs the span itself.
             uProjShadowDepth: { value: new THREE.Vector2(0, 1) },
             uProjShadowFade: { value: new THREE.Vector2(ps.fadeNear, ps.fadeFar) },
             uProjShadowOpacity: { value: ps.opacity },
@@ -229,7 +230,7 @@ export class ProjectedShadows {
         (this._uniforms.uProjShadowGrid.value as THREE.Vector4)
             .set(cols, rows, 1 / cols, 1 / rows);
         (this._uniforms.uProjShadowDepth.value as THREE.Vector2)
-            .set(this._atlas.depthMin, this._atlas.depthInvSpan);
+            .set(this._atlas.depthMin, 1 / this._atlas.depthInvSpan);
     }
 
     /** Rebakes only when a renderer is available; safe during asynchronous model loading. */

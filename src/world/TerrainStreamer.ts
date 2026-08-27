@@ -111,14 +111,14 @@ export class TerrainStreamer {
         // only heights, so one safe overestimate avoids ever recomputing it.
         // Overestimating only costs a little missed culling; underestimating
         // makes chunks vanish at the edge of frame.
-        const size = t.chunkSize;
+        const sizeX = t.chunkWidth, sizeZ = t.chunkLength;
         // Must cover the tallest thing a chunk can contain. Mountains reach
         // `amplitude * 1.35` above the hills (ridge plus massif hump), and an
         // undersized sphere makes whole chunks vanish at the edge of frame.
-        const radius = Math.hypot(size, size) * 0.5 + t.skirtDepth
+        const radius = Math.hypot(sizeX, sizeZ) * 0.5 + t.skirtDepth
             + t.amplitude * 2 + Math.abs(cfg.road.slopeAmplitude)
             + t.mountains.amplitude * 1.4;
-        const boundingSphere = new THREE.Sphere(new THREE.Vector3(size / 2, 0, -size / 2), radius);
+        const boundingSphere = new THREE.Sphere(new THREE.Vector3(sizeX / 2, 0, -sizeZ / 2), radius);
 
         for (let i = 0; i < slotCount; i++) {
             const positions = new Float32Array(vertexCount * 3);
@@ -136,10 +136,6 @@ export class TerrainStreamer {
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.visible = false;
-            // Receives but does not cast: hills shadowing each other is a second
-            // pass over the heaviest geometry in the scene for an effect the fog
-            // hides at any distance where it would be visible.
-            mesh.receiveShadow = cfg.lighting.shadows.enabled;
             scene.add(mesh);
 
             this._slots.push({ mesh, positions, normals, uvs, colors, cx: 0, cz: 0, inUse: false, ready: false });
@@ -191,8 +187,7 @@ export class TerrainStreamer {
      */
     update(): void {
         const t = cfg.terrain;
-        const size = t.chunkSize;
-        const baseCz = Math.floor(this._scroll.travelled / size);
+        const baseCz = Math.floor(this._scroll.travelled / t.chunkLength);
 
         if (baseCz !== this._lastBaseCz) {
             this._lastBaseCz = baseCz;
@@ -206,7 +201,7 @@ export class TerrainStreamer {
         const travelled = this._scroll.travelled;
         for (const slot of this._slots) {
             if (!slot.inUse || !slot.ready) continue;
-            slot.mesh.position.z = travelled - slot.cz * size;
+            slot.mesh.position.z = travelled - slot.cz * t.chunkLength;
         }
     }
 
@@ -245,7 +240,7 @@ export class TerrainStreamer {
                 slot.inUse = true;
                 slot.ready = false;
                 slot.mesh.visible = false;
-                slot.mesh.position.x = cx * cfg.terrain.chunkSize;
+                slot.mesh.position.x = cx * cfg.terrain.chunkWidth;
                 this._byKey.set(key, slot);
                 this._queue.push(slot);
             }
@@ -280,7 +275,7 @@ export class TerrainStreamer {
         (geometry.getAttribute('uv') as THREE.BufferAttribute).needsUpdate = true;
         (geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
 
-        slot.mesh.position.z = this._scroll.travelled - slot.cz * cfg.terrain.chunkSize;
+        slot.mesh.position.z = this._scroll.travelled - slot.cz * cfg.terrain.chunkLength;
         slot.ready = true;
         slot.mesh.visible = true;
 

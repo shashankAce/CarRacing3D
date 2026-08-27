@@ -131,7 +131,24 @@ export const gameConfig = {
      * frame-spike risk in this game, which is what `maxBuildsPerFrame` bounds.
      */
     terrain: {
-        chunkSize: 40,
+        /**
+         * Chunk size, metres, split by axis rather than one square `chunkSize`.
+         * Lateral (X) view is short — portrait FOV is only ~42°, so sideways
+         * coverage needed is far less than the forward draw distance — while
+         * depth (Z) has to reach as far as the fog does. Independent knobs let
+         * the lateral window shrink (fewer chunks-wide, or a narrower
+         * `chunkWidth`) without shrinking how far ahead the road is built.
+         * Every piece of terrain math that used to assume a square chunk
+         * (normal differencing in `chunkMesh.ts`, the self-shadow lattice in
+         * `terrainShadow.ts`, the road-corridor margin in `heightField.ts`, tree
+         * placement in `ScatterStreamer.ts`) now takes both axes separately.
+         * Both were 40 — the old square size — until tuned to the values below;
+         * narrower than `chunksAhead × chunkLength`'s ~42°-FOV coverage
+         * requirement needs is a real risk here, not just a hypothetical — see
+         * the `chunksWide` comment below.
+         */
+        chunkWidth: 30,
+        chunkLength: 40,
         /** Vertices per chunk edge. Cost scales with the square of this. */
         resolution: 17,
         /**
@@ -156,8 +173,9 @@ export const gameConfig = {
          * threshold rather than comfortably past it.
          *
          * This does NOT raise the chunk build RATE, which is set by
-         * speed / chunkSize — one row per 40m travelled however far ahead it
-         * sits. It costs resident memory and triangles only.
+         * speed / chunkLength — one row per `chunkLength` metres travelled
+         * however far ahead it sits. It costs resident memory and triangles
+         * only.
          */
         chunksAhead: 5,
         chunksBehind: 1,
@@ -178,7 +196,7 @@ export const gameConfig = {
          * `baseFrequency` is the reciprocal of a wavelength: 0.045 is a ~140m
          * lowest octave, with the two above it at ~58m and ~24m. Keep the
          * lowest octave's wavelength WELL under the visible distance
-         * (chunkSize * chunksAhead) or the terrain reads as a flat tilt rather
+         * (chunkLength * chunksAhead) or the terrain reads as a flat tilt rather
          * than as hills — at 0.016 the wavelength was 393m against ~150m of
          * visible ground, and it looked like a plane.
          */
@@ -189,11 +207,11 @@ export const gameConfig = {
          * TERRAIN THAT SHADOWS ITSELF — hills shading the ground behind them,
          * mountains laying shadow down their own flanks.
          *
-         * This is not the same feature as `lighting.shadows` or
-         * `lighting.bakedShadows`, and neither of those has ever done it: the
-         * terrain mesh carries `receiveShadow` only, so it has never been a
-         * shadow CASTER under any setting. Those two handle the car, traffic
-         * and trees; this handles the ground.
+         * This is not the same feature as `lighting.projectedShadows` or
+         * `lighting.treeShadows`, and neither of those does this: the terrain
+         * mesh has never been a shadow CASTER under either. Those two handle
+         * the car, traffic and trees falling onto other surfaces; this
+         * handles the ground shading itself.
          *
          * It is baked into the vertex colour at chunk build time, so it costs
          * nothing per frame — no draw call, no render target, no texture, no
@@ -226,16 +244,18 @@ export const gameConfig = {
             reach: 70,
             /**
              * March samples per lattice point. THE COST DIAL — total height-field
-             * evaluations per chunk are `steps * (chunkSize/gridStep + 1)^2`, and
-             * the existing build already spends 361 of them. Distances ramp
-             * quadratically, so raising this refines the near end most.
+             * evaluations per chunk are `steps * (chunkWidth/gridStep + 1) *
+             * (chunkLength/gridStep + 1)`, and the existing build already spends
+             * 361 of them. Distances ramp quadratically, so raising this refines
+             * the near end most.
              */
             steps: 5,
             /**
-             * Lattice spacing for the march, metres. MUST DIVIDE `chunkSize`
-             * exactly, or chunk edges stop sharing sample points with their
-             * neighbours and seams appear; `makeShadeGrid` warns if it doesn't.
-             * Cost scales with the inverse SQUARE of this, so 5 -> 2.5 is 4x.
+             * Lattice spacing for the march, metres. MUST DIVIDE both
+             * `chunkWidth` AND `chunkLength` exactly, or chunk edges stop sharing
+             * sample points with their neighbours and seams appear;
+             * `makeShadeGrid` warns if it doesn't. Cost scales with the inverse
+             * SQUARE of this, so 5 -> 2.5 is 4x.
              */
             gridStep: 5,
             /**
@@ -273,7 +293,7 @@ export const gameConfig = {
          */
         mountains: {
             /** Peak height above the hills, metres. */
-            amplitude: 30,
+            amplitude: 10,
             /** Region mask: low frequency, thresholded. Wavelength ~1800m. */
             regionFrequency: 0.0035,
             threshold: 0.5,
@@ -292,8 +312,8 @@ export const gameConfig = {
              * verge; but the view frustum is only ±21°, so pushing them too far
              * out means they're only ever seen deep in the fog.
              */
-            distanceStart: 38,
-            distanceFull: 105,
+            distanceStart: 0,
+            distanceFull: 30,
             /**
              * How much the small hill octaves are damped inside a mountain
              * region, so their bumps don't fight the ridge's own shape.
@@ -371,6 +391,8 @@ export const gameConfig = {
      * the road (§6 D2) rather than snapping between lanes.
      */
     traffic: {
+        /** QA mode: keep the seeded traffic in place for close shadow inspection. */
+        frozen: false,
         laneCount: 4,
         /** Ceiling on live vehicles; the pool is allocated to exactly this. */
         maxAlive: 5,
@@ -542,8 +564,8 @@ export const gameConfig = {
      */
     roadSurface: {
         bandLength: 20,
-        bandsAhead: 15,
-        bandsBehind: 2,
+        bandsAhead: 10,
+        bandsBehind: 1,
         /** Z-subdivisions per band. Only matters when `curveAmplitude` is non-zero. */
         segmentsPerBand: 4,
         /** Lift above `road.level` — coplanar surfaces z-fight. */
@@ -600,11 +622,6 @@ export const gameConfig = {
      * gas decelerates. The old automatic ramp is gone — the ramp was
      * what made the run get harder on its own, and that job now belongs to the
      * fuel timer plus the fact that bends can't be held at full speed.
-     *
-     * `min` is above the FASTEST traffic (23 m/s) on purpose. If the player
-     * could brake below traffic speed, vehicles would overtake from behind and
-     * hit them from a direction they can't see — an unfair death, and the one
-     * thing worth designing out (§5.5a).
      */
     speed: {
         start: 30,
@@ -899,7 +916,7 @@ export const gameConfig = {
      * `height` makes the same m/s feel slower, every time.
      */
     camera: {
-        fov: 70,
+        fov: 68,
         /**
          * `far` must exceed `sky.domeRadius`, which must in turn exceed the
          * farthest terrain corner (305m at the current chunk window) — the dome
@@ -1023,7 +1040,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 14,
+            hour: 9,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
@@ -1085,37 +1102,6 @@ export const gameConfig = {
         },
         /** How far along `sunDirection` the light is placed, metres. */
         sunDistance: 90,
-        /**
-         * Real-time shadow maps. The most expensive thing in the renderer for
-         * the least gameplay value at this camera angle, so this is a deliberate
-         * on/off knob rather than something assumed.
-         *
-         * The shadow camera is orthographic and FOLLOWS the car, so `reachAhead`
-         * and `reachBehind` bound the near field, not the draw distance. Its
-         * half-extent and centre are DERIVED from them rather than configured,
-         * because the pair is what anyone actually wants to reason about:
-         *
-         *     radius = (reachAhead + reachBehind) / 2
-         *     centre = (reachBehind - reachAhead) / 2   (render Z, forward is -Z)
-         */
-        /**
-         * Baked shadow decals: one instanced quad per caster, instead of a
-         * shadow map. See `world/ShadowDecals.ts` for the measurements.
-         *
-         * Short version — the real-time path costs 15 draw calls, 4,268 triangles
-         * and 3 extra shader programs a frame, and worse, all 72 receivers take a
-         * PCF sample per fragment. The receivers are the terrain and the road, so
-         * that is a per-pixel tax across most of the screen on a GPU that is
-         * fill-bound. Decals are ~2 draws and ~500 triangles with no per-pixel
-         * cost outside the blobs.
-         *
-         * Nothing real is lost here because terrain never cast shadows anyway;
-         * what goes is objects shadowing each other, which this camera cannot
-         * see. The one honest regression is tree shadows at a very low sun, where
-         * a stretched blob has none of the structure a projected canopy does.
-         *
-         * Use ONE of these and `shadows.enabled`, not both.
-         */
         /**
          * TREE SHADOWS — hundreds of static casters, in one top-down texture.
          *
@@ -1182,6 +1168,20 @@ export const gameConfig = {
              * tree the car has just passed.
              */
             forwardBias: 0.40,
+            /**
+             * Lateral distance from the road centre (`roadCenterX` at the tree's
+             * OWN z, since the road curves) past which a near tree stops
+             * casting into the mask. Trees this far out sit in the background
+             * scatter, not the roadside treeline — `trees.roadClearance` (12) to
+             * `terrain.chunksWide` x `terrain.chunkWidth` / 2 (60) is the full
+             * range a tree can occupy, and nothing beyond a few tree-depths of the
+             * verge ever throws a shadow onto ground the camera can see.
+             *
+             * Skipped before `TreeShadowMask.add`'s per-instance vector math,
+             * not after — same shape as the near/far LOD split, just against the
+             * road instead of the viewer.
+             */
+            maxRoadDistance: 30,
             /**
              * Atlas cell resolution per tree variant. 256, not 128, so the ATLAS
              * is not the bottleneck as well: at 256 a cell resolves ~40 texels/m
@@ -1287,118 +1287,6 @@ export const gameConfig = {
             fadeFar: 25,
         },
 
-        bakedShadows: {
-            enabled: false,
-            /**
-             * Tree decals are OFF, and this is a real limitation rather than a
-             * tuning choice.
-             *
-             * A decal is one planar quad, and the projected length is
-             * height/sin(elevation) — a 14m tree at a 28 degree sun covers 30m of
-             * ground. Terrain here has 5.5m of amplitude over a ~140m wavelength,
-             * so across 30m the ground moves metres and the quad spends most of
-             * its length underground. Rendered as solid quads to check, the tree
-             * shadows show as fragments poking out from behind rises: not a seam,
-             * a broken shadow.
-             *
-             * Vehicles are unaffected because they are short (a car covers ~3m)
-             * and sit on the ROAD, which is a flat ribbon — those are effectively
-             * exact.
-             *
-             * Fixing trees needs the shadows to DRAPE, which a quad cannot do.
-             * The way is a top-down shadow mask: draw every silhouette into one
-             * orthographic render target from above, and have the terrain and
-             * road shaders sample it by world XZ. That is correct on any terrain
-             * by construction, and costs one 512-square target plus a fetch per
-             * ground fragment. See `world/ShadowDecals.ts`.
-             */
-            includeTrees: false,
-            /** How dark, 0-1. Shadows here are ambient occlusion as much as shadow. */
-            opacity: 0.42,
-            /**
-             * Silhouette texture edge, pixels, per caster shape.
-             *
-             * 64 was carried over from when these were soft blobs and is far too
-             * coarse for a shape: a tree's silhouette stretches to ~30m of ground
-             * at a 28-degree sun, so 64 pixels is half a metre each and the trunk
-             * and canopy dissolve into a smear. 256 gives ~64 px/m across and
-             * ~18 along, which holds the shape.
-             *
-             * Cost is VRAM only, once: 256-square RGBA per distinct shape, so
-             * about 2.4MB across the nine currently registered. Nothing per frame.
-             */
-            textureSize: 256,
-            /** Ceiling on live decals. Trees dominate; ~260 is typical. */
-            maxInstances: 400,
-            /**
-             * Cap on shadow length as a multiple of caster height.
-             *
-             * Length is height/tan(elevation), which is unbounded as the sun
-             * drops — at 8 degrees it is 7x, and a 7x-stretched blob reads as a
-             * smear rather than a shadow. This is where realism gives way.
-             */
-            stretchMax: 3.5,
-            /** Metres above the ground, to stay out of a z-fight on slopes. */
-            lift: 0.06,
-            /** Footprint width as a multiple of the caster's radius. */
-            spread: 1.15,
-        },
-        shadows: {
-            /**
-             * Re-enabled to be re-measured. These were switched OFF in the
-             * "back to 60fps on device" pass, but at 1024/70m — the numbers
-             * below are the tuned-down replacements that were never actually
-             * verified with shadows on. Depth-pass fill scales with mapSize^2,
-             * so 512 is a quarter of what was measured as costing ~8.9ms.
-             * Check `frame` and `worst` on the phone; if it regresses, this
-             * flag is the one to flip, not the map size.
-             *
-             * OFF now: `bakedShadows` replaces this. Kept switchable because a
-             * shadow map is still the better answer for tree shadows at a very
-             * low sun, where a stretched decal has no structure.
-             */
-            enabled: false,
-            /**
-             * 512, not 1024. Measured at ~8.9ms a frame on a low-end phone at
-             * 1024 with a 70m frustum — a third of a 42ms regression. Halving
-             * the map quarters the fill of the depth pass, and halving the
-             * frustum with it keeps texel density (and therefore edge quality)
-             * roughly where it was.
-             */
-            mapSize: 512,
-            /**
-             * How far AHEAD of the car shadows exist, metres. This is the knob
-             * for "shadows appear too late" — beyond it there is no shadow at
-             * all, so trees pop theirs on as they cross it.
-             *
-             * Raising it is FREE in fill cost: the depth pass renders the same
-             * mapSize either way, this only changes how much world each texel
-             * covers. What it costs is sharpness — texel size is
-             * (reachAhead + reachBehind) / mapSize, so doubling the reach doubles
-             * the blockiness. `mapSize` buys that back and is the expensive one:
-             * 1024 is 4x the depth-pass pixels of 512.
-             *
-             * Hard ceiling: `trees.lodCrossover`. Past it trees are billboards
-             * and cast nothing (they cannot, being flat), so pushing this beyond
-             * that distance buys nothing for trees.
-             */
-            reachAhead: 60,
-            /**
-             * How far BEHIND the car shadows exist, metres.
-             *
-             * This was the waste. The centre used to be a hidden `radius * 0.4`
-             * in `_updateSun`, which at radius 40 put 24m of the box behind a
-             * camera that sits only 8.2m back — a third of the shadow map spent
-             * on ground nobody can see. 14 keeps enough for the car's own shadow
-             * and the setback, and hands the rest forward for nothing.
-             */
-            reachBehind: 14,
-            near: 1,
-            far: 260,
-            /** Peter-panning vs acne. normalBias is the safer of the two dials. */
-            bias: -0.0005,
-            normalBias: 0.6,
-        },
     },
 
     /**
@@ -1741,9 +1629,17 @@ export const gameConfig = {
              * see: at a fixed -8.8° pitch and a 68° vertical FOV, visible
              * elevation is -43°..+25°, so clouds above ~25° are never in frame.
              * A first pass used 14..46° and produced an empty sky.
+             *
+             * Both raised 20% from that derived band (6/24 -> 7.2/28.8) on
+             * request. `maxElevation` now sits ABOVE the +25° visible ceiling —
+             * cloud instances randomly placed past 25° (elevation is sampled
+             * uniformly across the whole band) render outside the frustum and
+             * are simply never seen, same failure shape as the "empty sky"
+             * first pass above, just partial instead of total. Worth checking
+             * the sky on the dev server for thinning near the top of frame.
              */
-            minElevation: 6,
-            maxElevation: 24,
+            minElevation: 7.2,
+            maxElevation: 28.8,
             /**
              * Half-width of the arc clouds occupy, degrees, measured around
              * forward. The horizontal FOV is only ~42° (±21°), so this is that
@@ -1881,7 +1777,5 @@ export const gameConfig = {
     render: {
         pixelRatioCap: 2,
         resolutionScale: 1,
-        /** Real-time shadow maps are off by default — see ARCHITECTURE.md §5.9. */
-        shadows: false,
     },
 };

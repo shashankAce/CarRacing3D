@@ -3,7 +3,6 @@ import { Node, Group3D, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';
-import type { ShadowDecals } from '../world/ShadowDecals';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
 import type { VehicleVisual } from '../assets/VehicleModels';
 
@@ -71,43 +70,6 @@ export class PlayerCar {
     get isAgainstEdge(): boolean { return this._againstEdge; }
 
     /** Half-extents used for ground sampling and (Phase 4) collision. */
-    /**
-     * The car's own decal. Uses the DRIVABLE surface under it rather than the
-     * group's y, which carries suspension travel and pitch — a shadow that
-     * bobbed with the springs would read as the ground moving.
-     */
-    /**
-     * Silhouette from the body and cabin MERGED, so the shadow has the cabin
-     * step in it rather than being one flat box. Built at the same local offsets
-     * the visible meshes use, since the silhouette is projected from the same
-     * geometry the camera sees.
-     */
-    registerShadow(decals: ShadowDecals): void {
-        const c = cfg.car;
-        const body = new THREE.BoxGeometry(this._width, this._height, this._length);
-        body.translate(0, this._height / 2, 0);
-        const cabin = new THREE.BoxGeometry(
-            this._width * c.cabinWidthFactor, c.cabinHeight, this._length * c.cabinLengthFactor);
-        cabin.translate(0, this._height + c.cabinHeight / 2, this._length * 0.1);
-        // Two parts, not merged — the baker renders both into one silhouette.
-        this._shadowHandle = decals.register([body, cabin]);
-    }
-
-    addShadow(decals: ShadowDecals, travelled: number): void {
-        // The DRIVABLE surface under the car, not the group's y — that carries
-        // suspension travel, and a shadow bobbing with the springs reads as the
-        // ground moving rather than the car.
-        const position = this._group.object3D.position;
-        decals.add(
-            this._shadowHandle,
-            position.x,
-            surfaceHeightAt(position.x, travelled - position.z),
-            position.z,
-            1,
-        );
-    }
-
-    private _shadowHandle = -1;
     private _projectedHandle = -1;
     private _materials: THREE.Material[] = [];
 
@@ -115,9 +77,9 @@ export class PlayerCar {
     get receiverMaterials(): THREE.Material[] { return this._materials; }
 
     /**
-     * Registers the car as a projected-shadow caster. Same two parts as the
-     * decal path, translated by their real local offsets — the caster origin in
-     * the shader is the group's own origin, so the geometry has to be expressed
+     * Registers the car as a projected-shadow caster: body and cabin,
+     * translated by their real local offsets — the caster origin in the
+     * shader is the group's own origin, so the geometry has to be expressed
      * relative to it.
      */
     registerProjected(shadows: ProjectedShadows): void {
