@@ -23,6 +23,9 @@ export interface TrafficVehicle {
     model: THREE.Object3D | null;
     /** Reduced version of this same FBX used outside the full-detail radius. */
     lodModel: THREE.Object3D | null;
+    /** Custom-wheel animation for the full and distant visual tiers. */
+    spinWheels: (distance: number) => void;
+    spinLodWheels: (distance: number) => void;
     /** Cached to avoid toggling child visibility when a vehicle remains in one tier. */
     fullDetail: boolean;
     /** Fixed per pool slot, so spawning never allocates a new model. */
@@ -107,9 +110,13 @@ export class TrafficSystem {
         const bodyGeometry = new THREE.BoxGeometry(1, 1, 1);
         const indicatorGeometry = new THREE.BoxGeometry(1, 1, 1);
         const indicatorMaterial = new THREE.MeshBasicMaterial({ color: t.overtake.indicatorColor });
-        const slotTypes: number[] = [];
-        t.types.forEach((type, index) => {
-            for (let count = 0; count < type.weight; count++) slotTypes.push(index);
+        if (t.pool.length !== t.maxAlive) {
+            throw new Error('traffic.pool must contain exactly traffic.maxAlive model names.');
+        }
+        const slotTypes = t.pool.map((name) => {
+            const index = t.types.findIndex((type) => type.name === name);
+            if (index < 0) throw new Error(`Unknown traffic pool model "${name}".`);
+            return index;
         });
 
         for (let i = 0; i < t.maxAlive; i++) {
@@ -130,6 +137,7 @@ export class TrafficSystem {
 
             this._pool.push({
                 group, body, indicator, model: null, lodModel: null, fullDetail: true,
+                spinWheels: () => {}, spinLodWheels: () => {},
                 modelType: slotTypes[i % slotTypes.length], active: false, type: 0,
                 laneF: 0, targetLane: 0, worldZ: 0,
                 desiredSpeed: 0, speed: 0,
@@ -173,12 +181,14 @@ export class TrafficSystem {
                 for (const geometry of visual.shadowGeometries) geometry.translate(0, -spec.height / 2, 0);
             }
             v.model = visual.root;
+            v.spinWheels = visual.spinWheels;
             v.group.object3D.add(v.model);
             const lodVisual = models.create(spec.model, 'distant');
             // The compact LOD shares the full model's normalized local origin.
             lodVisual.root.position.y -= spec.height / 2;
             v.lodModel = lodVisual.root;
             v.lodModel.visible = false;
+            v.spinLodWheels = lodVisual.spinWheels;
             v.group.object3D.add(v.lodModel);
             this._materials.push(...visual.materials, ...lodVisual.materials);
             this._materialsByType[v.modelType].push(...visual.materials, ...lodVisual.materials);
@@ -246,6 +256,8 @@ export class TrafficSystem {
             }
             this._place(v, travelled);
             this._updateLod(v, playerX);
+            v.spinWheels(v.worldZ);
+            v.spinLodWheels(v.worldZ);
         }
 
         if (travelled >= this._nextSpawnAt) {
@@ -633,6 +645,8 @@ export class TrafficSystem {
         slot.indicator.visible = false;
         this._place(slot, travelled);
         this._updateLod(slot, playerX, true);
+        slot.spinWheels(slot.worldZ);
+        slot.spinLodWheels(slot.worldZ);
         return true;
     }
 

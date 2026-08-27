@@ -40,6 +40,7 @@ export class PlayerCar {
     private _group: Group3D;
     private _visual: THREE.Object3D | null = null;
     private _shadowGeometries: THREE.BufferGeometry[] = [];
+    private _spinWheels: (distance: number) => void = () => {};
     private _width = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.width ?? cfg.car.width;
     private _height = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.height ?? cfg.car.height;
     private _length = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.length ?? cfg.car.length;
@@ -169,6 +170,7 @@ export class PlayerCar {
         this._length = dimensions.length;
         this._materials = visual.materials;
         this._shadowGeometries = visual.shadowGeometries;
+        this._spinWheels = visual.spinWheels;
         this._group.object3D.add(this._visual);
         this.reset();
     }
@@ -315,6 +317,7 @@ export class PlayerCar {
             this._roll + turnT * steering.maxRollAngle * speedFactor,
             'YXZ',
         );
+        this._spinWheels(worldZ);
 
     }
 
