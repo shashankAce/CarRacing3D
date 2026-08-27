@@ -1,9 +1,30 @@
-# Mobile Optimization Plan
+# Mobile Performance Optimization — Final Report
 
-## Previous plan: complete
+## Status: complete (27 August 2026)
 
-The original plan below is entirely implemented and confirmed in current
-`gameConfig.ts`:
+The 60 FPS mobile target has been reached without any further visual-quality
+reduction in the final optimization pass.
+
+| Result | Value |
+|---|---:|
+| Final owner-verified phone FPS | **60 FPS locked** |
+| Final frame time | **16.7 ms** |
+| TypeScript check | Pass |
+| Production build | Pass |
+
+The phone result above was recorded after all 11 optimizations. A stable
+16.7 ms frame is exactly the interval of a 60 Hz refresh cycle, so the result
+is consistent with the device/VSync ceiling rather than a remaining game-side
+performance bottleneck.
+
+No more speculative optimization is recommended now. Any future performance
+work should start with a fresh profile on a device that actually misses its
+frame budget; otherwise changes risk adding complexity without a measurable
+player benefit.
+
+## Completed optimizations
+
+All planned work is implemented in the current source and configuration:
 
 1. **Merge static vehicle meshes by material** — done. `VehicleModels` batches
    each FBX into one mesh per material class.
@@ -30,12 +51,31 @@ The original plan below is entirely implemented and confirmed in current
    billboard LOD buckets are compared by placement identity; while membership
    is unchanged, all tree motion comes from one shared Z transform per batch.
    Matrices upload only when a chunk or LOD crossing actually changes a bucket.
+10. **Stop rewriting road-marker buffers every frame** — done. Centre dashes
+   and roadside posts now move through one shared Z transform per batch, while
+   their instance matrices are refreshed only when a marker wraps to the front.
+   Curved-road position, height, heading, and pitch remain sampled at the exact
+   same absolute world coordinates.
+11. **Stop uploading unchanged tree-shadow instances** — done. Tree-shadow
+   centres are stored against a rolling world anchor and scrolled in the mask
+   shader through one uniform. Four instance attributes now upload only when
+   the visible caster data actually changes, with a periodic 512m re-anchor to
+   preserve the infinite world's floating-point precision.
 
-The measurements and per-vehicle table below this line are from before that
-work and are now stale — the FBX draw-call counts (33-40/vehicle) no longer
-reflect the batched vehicles. Superseded by the measurements that follow.
+### Final verification
 
-## Current measurements
+- `npm run types` passes.
+- `npm run build` passes.
+- Road-marker shared-scroll math was checked across normal movement, wrap
+  boundaries, long jumps, and reset; it matched the original placement math.
+- Projected-shadow coarse bounds were validated as conservative across
+  randomized vehicle yaws before being enabled.
+- Shadow correctness issues were visually checked and confirmed fixed by the
+  project owner.
+- Mobile driving was checked by the project owner after all optimizations at
+  60 FPS locked / 16.7 ms.
+
+## Historical controlled measurements
 
 Methodology: Playwright + CDP, `Emulation.setCPUThrottlingRate` at 20x, driven
 with continuous gas + weaving steer input (not idle) so terrain/traffic
@@ -52,11 +92,10 @@ isolates CPU-bound cost, the way a weak mobile chip would.
 | draw calls | 136-161 |
 | triangles | 76k-96k |
 
-This lines up with the "brought fps to 50 on mobile" commit. No single
-remaining bottleneck — the batching/capping work above already did its job.
-**Stale relative to the config below** — terrain and road-band tuning since
-this measurement should have shifted draw calls down slightly; not
-re-profiled after the latest round of edits.
+These profiler numbers predate several completed optimizations and are retained
+only as historical evidence. They must not be treated as the final build's
+current draw-call or triangle counts. The final real-device result is the
+owner-verified 60 FPS locked / 16.7 ms reported at the top of this document.
 
 ## Draw-call breakdown (verified, not estimated)
 
@@ -184,11 +223,13 @@ not because they're optimizations.
   cover near the top of the sky rather than actually moving it up. Not yet
   checked visually.
 
-## Open items
+## Optional future validation (not blocking)
 
-- Re-profile draw calls / FPS against the current config — the numbers above
-  are computed from formulas, not measured, and several tuning changes have
-  stacked since the last real capture.
+The optimization plan is complete. These are visual QA or future profiling
+notes, not unfinished performance work:
+
+- Re-profile draw calls against the current config only if a new device falls
+  below the frame budget; the detailed counts above are historical.
 - Terrain lateral coverage vs. view frustum at `chunkWidth: 30` — check for a
   visible edge at the horizon.
 - Cloud `maxElevation: 28.8` vs. the ~25° visible ceiling — check for visible
