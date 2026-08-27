@@ -12,6 +12,14 @@ export interface VehicleVisual {
 }
 
 type VehicleSpec = typeof cfg.vehicles.models[number];
+type VehicleMaterialKey = 'PixelColors' | 'Glass' | 'Headlights' | 'Fallback';
+
+interface VehicleTemplate {
+    /** One renderable static mesh per material class — normally three meshes. */
+    geometries: Map<VehicleMaterialKey, THREE.BufferGeometry>;
+}
+
+const MATERIAL_ORDER: VehicleMaterialKey[] = ['PixelColors', 'Glass', 'Headlights', 'Fallback'];
 
 /**
  * Loads the shared vehicle catalog once, then supplies normalized static clones.
@@ -23,7 +31,7 @@ type VehicleSpec = typeof cfg.vehicles.models[number];
  */
 export class VehicleModels {
 
-    private _templates = new Map<VehicleModelId, THREE.Object3D>();
+    private _templates = new Map<VehicleModelId, VehicleTemplate>();
     private _palette: THREE.Texture | null = null;
 
     async load(): Promise<void> {
@@ -35,7 +43,7 @@ export class VehicleModels {
             textureLoader.loadAsync(cfg.vehicles.paletteTexture),
             ...cfg.vehicles.models.map(async (spec) => {
                 const asset = await cache.loadModel(spec.asset, `vehicle:${spec.id}`);
-                this._templates.set(spec.id, asset.scene);
+                this._templates.set(spec.id, this._prepareTemplate(spec, asset.scene));
             }),
         ]);
         palette.colorSpace = THREE.SRGBColorSpace;
@@ -54,45 +62,79 @@ export class VehicleModels {
         const template = this._templates.get(id);
         if (!template || !this._palette) throw new Error(`Vehicle model "${id}" has not loaded.`);
 
-        const spec = this.spec(id);
-        const root = template.clone(true);
+        const root = new THREE.Group();
         const materials: THREE.Material[] = [];
 
-        root.traverse((object) => {
-            if (!(object instanceof THREE.Mesh)) return;
-            const hadMaterialArray = Array.isArray(object.material);
-            const sourceMaterials = hadMaterialArray ? object.material : [object.material];
-            const mapped = sourceMaterials.map((material: THREE.Material) => this._createMaterial(material?.name));
-            // A material array only renders against geometry groups. Sedan1's
-            // wheel meshes have one material and no groups, so keep theirs scalar.
-            object.material = hadMaterialArray ? mapped : mapped[0];
-            object.castShadow = cfg.lighting.shadows.enabled;
-            object.receiveShadow = true;
-            materials.push(...mapped);
-        });
+        // The FBXs are static. Their original 8–10 meshes and 33–40 material
+        // groups were the source of hundreds of mobile draw calls for traffic.
+        // Templates bake every part's local transform once, then create only
+        // one mesh per material class here. Geometry remains shared between all
+        // pool slots; only the three materials are per-visual because player and
+        // traffic receivers need different projected-shadow `skip` values.
+        for (const key of MATERIAL_ORDER) {
+            const geometry = template.geometries.get(key);
+            if (!geometry) continue;
+            const material = this._createMaterial(key);
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = cfg.lighting.shadows.enabled;
+            mesh.receiveShadow = true;
+            root.add(mesh);
+            materials.push(material);
+        }
 
-        // FBX exports use +Z as front while this game drives along -Z.
-        root.rotation.y = spec.rotationY;
-        root.scale.setScalar(spec.scale);
-        root.updateMatrixWorld(true);
-        const bounds = new THREE.Box3().setFromObject(root);
-        const centre = bounds.getCenter(new THREE.Vector3());
-        root.position.set(-centre.x, -bounds.min.y, -centre.z);
-
-        // Capture the fully normalized FBX mesh rather than a gameplay proxy.
-        // `root` has no parent yet, so its world matrices are exactly the local
-        // transforms it will have once attached to a player or traffic group.
-        root.updateMatrixWorld(true);
-        const shadowGeometries: THREE.BufferGeometry[] = [];
-        root.traverse((object) => {
-            if (!(object instanceof THREE.Mesh)) return;
-            shadowGeometries.push(object.geometry.clone().applyMatrix4(object.matrixWorld));
-        });
+        // Shadow capture still receives all original triangles. Clones are
+        // intentional: traffic shifts its first visual's capture geometry into
+        // its centre-origin group, and must never mutate shared render geometry.
+        const shadowGeometries = [...template.geometries.values()].map((geometry) => geometry.clone());
 
         return { root, materials, shadowGeometries };
     }
 
-    private _createMaterial(name: string | undefined): THREE.Material {
+    /** Builds the compact, normalised static geometry for one FBX once at load. */
+    private _prepareTemplate(spec: VehicleSpec, source: THREE.Object3D): VehicleTemplate {
+        const model = source.clone(true);
+        // FBX exports use +Z as front while this game drives along -Z.
+        model.rotation.y = spec.rotationY;
+        model.scale.setScalar(spec.scale);
+        model.updateMatrixWorld(true);
+        const bounds = new THREE.Box3().setFromObject(model);
+        const centre = bounds.getCenter(new THREE.Vector3());
+        model.position.set(-centre.x, -bounds.min.y, -centre.z);
+        model.updateMatrixWorld(true);
+
+        const batches = new Map<VehicleMaterialKey, THREE.BufferGeometry[]>();
+        model.traverse((object) => {
+            if (!(object instanceof THREE.Mesh)) return;
+            const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+            const groups = object.geometry.groups.length > 0
+                ? object.geometry.groups
+                : [{ start: 0, count: object.geometry.getIndex()?.count ?? object.geometry.getAttribute('position').count, materialIndex: 0 }];
+            for (const group of groups) {
+                const key = this._materialKey(sourceMaterials[group.materialIndex]?.name);
+                const part = sliceGroup(object.geometry, group.start, group.count);
+                // This leaves every compact mesh in the vehicle root's local
+                // space, exactly matching the old hierarchy after normalisation.
+                part.applyMatrix4(object.matrixWorld);
+                const list = batches.get(key) ?? [];
+                list.push(part);
+                batches.set(key, list);
+            }
+        });
+
+        const geometries = new Map<VehicleMaterialKey, THREE.BufferGeometry>();
+        for (const key of MATERIAL_ORDER) {
+            const parts = batches.get(key);
+            if (parts && parts.length > 0) geometries.set(key, mergeStaticParts(parts));
+        }
+        return { geometries };
+    }
+
+    private _materialKey(name: string | undefined): VehicleMaterialKey {
+        if (name === 'PixelColors' || name === 'Glass' || name === 'Headlights') return name;
+        return 'Fallback';
+    }
+
+    private _createMaterial(name: VehicleMaterialKey): THREE.Material {
         const source = cfg.vehicles.materials;
         if (name === 'PixelColors') {
             return new THREE.MeshStandardMaterial({
@@ -121,4 +163,54 @@ export class VehicleModels {
         }
         return new THREE.MeshStandardMaterial({ color: 0x9da9b7, roughness: 0.65 });
     }
+}
+
+/**
+ * Extracts one FBX material group as standalone, non-indexed geometry. The
+ * bundled car files have position/normal/UV only; keeping that narrow contract
+ * means no general-purpose geometry utility needs to enter the playable.
+ */
+function sliceGroup(source: THREE.BufferGeometry, start: number, count: number): THREE.BufferGeometry {
+    const index = source.getIndex();
+    const result = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv'] as const) {
+        const attribute = source.getAttribute(name);
+        if (!attribute) throw new Error(`Vehicle geometry is missing ${name}.`);
+        const values = new Float32Array(count * attribute.itemSize);
+        for (let i = 0; i < count; i++) {
+            const sourceIndex = index ? index.getX(start + i) : start + i;
+            for (let component = 0; component < attribute.itemSize; component++) {
+                values[i * attribute.itemSize + component] = attribute.array[sourceIndex * attribute.itemSize + component];
+            }
+        }
+        result.setAttribute(name, new THREE.BufferAttribute(values, attribute.itemSize));
+    }
+    return result;
+}
+
+/** Concatenates already non-indexed vehicle parts without changing triangle count. */
+function mergeStaticParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+    if (parts.length === 1) {
+        const single = parts[0];
+        single.computeBoundingSphere();
+        return single;
+    }
+
+    const result = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv'] as const) {
+        const itemSize = parts[0].getAttribute(name).itemSize;
+        const total = parts.reduce((count, part) => count + part.getAttribute(name).count, 0);
+        const values = new Float32Array(total * itemSize);
+        let offset = 0;
+        for (const part of parts) {
+            const attribute = part.getAttribute(name);
+            if (attribute.itemSize !== itemSize) throw new Error(`Vehicle ${name} attributes do not match.`);
+            values.set(attribute.array as Float32Array, offset);
+            offset += attribute.count * itemSize;
+        }
+        result.setAttribute(name, new THREE.BufferAttribute(values, itemSize));
+    }
+    for (const part of parts) part.dispose();
+    result.computeBoundingSphere();
+    return result;
 }
