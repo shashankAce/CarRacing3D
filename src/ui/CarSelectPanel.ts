@@ -34,19 +34,17 @@ export class CarSelectPanel {
 
         cfg.vehicles.models.forEach((model, index) => {
             const y = c.firstChoiceY - index * c.choiceGap;
-            const node = new Node(cx - c.choiceWidth / 2, y - c.choiceHeight / 2);
+            const node = new Node(cx, y - c.choiceHeight / 2);
             node.width = c.choiceWidth;
             node.height = c.choiceHeight;
             node.on(Input.POINTER_DOWN, () => {
                 if (this._visible) this._onSelect(model.id);
             }, this);
 
-            const labelNode = new Node(c.choiceWidth / 2, c.choiceHeight / 2);
-            const label = labelNode.addComponent(Label);
+            const label = node.addComponent(Label);
             label.fontSize = c.choiceFontSize;
             label.color = c.choiceColor;
             label.text = model.label;
-            node.addChild(labelNode);
             scene.addChild(node);
             this._choices.push({ node });
         });
