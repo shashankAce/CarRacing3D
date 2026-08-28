@@ -78,8 +78,15 @@ export default defineConfig(async ({ command, mode }) => {
             // how "used" is detected, and list any file/folder here that the
             // scan can't prove used on its own (e.g. a path built at runtime
             // from a value not known until the browser runs).
-            trimAssets: mode !== 'debug' && false,
-            include: [],
+            trimAssets: mode !== 'debug' && true,
+            include: [
+                'models/vehicles/PixelColors.png',
+                'models/vehicles/SportCar2.fbx',
+                'models/vehicles/Sedan1.fbx',
+                'models/vehicles/Car2.fbx',
+                // 'models/vehicles/Jeep2.fbx',
+                'models/vehicles/MicroBus4.fbx',
+            ],
         }));
 
         // detectUsage() always runs (cheap static analysis, no GPU/build cost)

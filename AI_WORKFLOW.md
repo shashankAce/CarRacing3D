@@ -27,17 +27,18 @@ it applies. Concretely:
 | `node.addSprite()` / `node.getComponent('Sprite')` string lookups | `node.addComponent(Sprite)` — pass the imported **class**, not a string |
 | `node.setPosition(x, y)` (two numbers) | `node.setPosition({x, y})` (one object) — or just `node.x = x; node.y = y;` |
 | A `.meta` file per asset, an `assets/` Creator project | `res/` is a flat asset folder read by `AssetCache`; nothing else touches it |
-| Any `import ... from 'phaser'/'cocos2d'/'pixi.js'/'three'` for engine basics | Everything 2D comes from `'noonengine'`. **In CarRacing3D, three.js is used directly and goes well past `skills/3d/`** — custom `ShaderMaterial`s, `onBeforeCompile` patches, `ShaderChunk` surgery, render targets. `skills/3d/` documents the NoonEngine *wrappers*; three.js's own behaviour is verified in `node_modules/three` and recorded in ARCHITECTURE.md §3 under the **[three.js]** tag. Don't confuse the two layers: which one a fact belongs to decides where you check it and whether an engine upgrade can change it. |
+| Any `import ... from 'phaser'/'cocos2d'/'pixi.js'/'three'` for engine basics | Everything 2D comes from `'noonengine'`. (Three.js is only relevant if this project used `--3d`, and even then only for the specific 3D APIs documented in `skills/3d/`.) |
 
 ### Playable-asset rule
 
-This project can ship through `npm run pack:*`, so load every runtime file from
-`res/` through `AssetCache`. Use `assetCache.preloadAssets()` for images, audio,
-JSON, fonts and similar assets; use `assetCache.loadModel()`/`loadModels()` for
-`.fbx` or self-contained `.glb` models. Do **not** load a `res/` file through
-`THREE.TextureLoader`, `THREE.FBXLoader`, `THREE.GLTFLoader`, raw `fetch()`, an
-HTML/CSS URL, or another direct URL API: a single-file playable embeds assets
-as `data:` URIs and only `AssetCache` resolves those rewritten paths at runtime.
+If this project might ship through any `npm run pack:*` playable target, load
+every runtime file from `res/` through `AssetCache`. Use
+`assetCache.preloadAssets()` for images, audio, JSON, fonts and similar assets;
+use `assetCache.loadModel()`/`loadModels()` for `.fbx` or self-contained `.glb`
+models. Do **not** load a `res/` file through `THREE.TextureLoader`,
+`THREE.FBXLoader`, `THREE.GLTFLoader`, raw `fetch()`, an HTML/CSS URL, or another
+direct URL API: a single-file playable embeds assets as `data:` URIs and only
+`AssetCache` resolves those rewritten paths at runtime.
 
 Raw Three.js remains fine for procedural geometry, materials, shaders, render
 targets, and assets generated in memory. This rule applies only to file-based

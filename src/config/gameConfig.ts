@@ -357,7 +357,7 @@ export const gameConfig = {
          * Fixed traffic pool, in spawn/recycle slot order. Keep this list the
          * same length as `maxAlive`; names must match an entry in `types`.
          */
-        pool: ['sedan', 'coupe', 'jeep', 'microbus', 'sedan'],
+        pool: ['sedan', 'coupe', 'coupe', 'microbus', 'sedan'],
         /**
          * Distant traffic keeps the same complete vehicle, but uses reduced
          * geometry. Tune or disable this entirely from this block.
@@ -772,10 +772,10 @@ export const gameConfig = {
         models: [
             // Player-only performance. Values are metres/second and m/s²;
             // traffic continues to use its independent `traffic.types` speeds.
-            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 86, accelerate: 8.2, brake: 16, autoBrake: 14 } },
+            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 120, accelerate: 8.2, brake: 16, autoBrake: 14 } },
             { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60, speed: { start: 28, min: 18, max: 66, accelerate: 6.6, brake: 14, autoBrake: 11 } },
             { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 75, accelerate: 7.2, brake: 14, autoBrake: 13 } },
-            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
+            // { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
             { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
         ],
         materials: {
@@ -1003,7 +1003,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 9,
+            hour: 17,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
