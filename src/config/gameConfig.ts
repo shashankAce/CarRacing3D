@@ -52,9 +52,9 @@ export const gameConfig = {
         cycle: {
             enabled: true,
             /** Metres of fully forest terrain before it starts drying out. */
-            forestLength: 320,
+            forestLength: 640,
             /** Metres of fully desert terrain before vegetation returns. */
-            desertLength: 320,
+            desertLength: 640,
             /** Metres used by each smooth forest/desert cross-fade. */
             transitionLength: 160,
         },
@@ -1757,7 +1757,7 @@ export const gameConfig = {
     debug: {
         /** Draws the exact player and traffic collision OBBs and dimensions. */
         collisionBox: {
-            enabled: true,
+            enabled: false,
             playerColor: 0x39ff88,
             trafficColor: 0xff9f32,
             labelColor: '#b8ffd3',
