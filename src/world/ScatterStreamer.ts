@@ -6,6 +6,7 @@ import { bakeTreeImpostor, impostorFrameSize } from '../procedural/treeImpostor'
 import { heightAt, normalAt } from '../procedural/heightField';
 import { roadCenterX } from './roadPath';
 import { mulberry32, hashChunk } from '../procedural/random';
+import { biomeBlendAt } from '../config/environment';
 import type { WorldScroll } from './WorldScroll';
 import type { TreeShadowMask } from './TreeShadowMask';
 
@@ -230,6 +231,9 @@ export class ScatterStreamer {
 
                 if (Math.abs(x - roadCenterX(z)) < t.roadClearance) continue;
                 if (ScatterStreamer._density(x, z) < t.densityCutoff) continue;
+                // Thin the forest progressively through the spatial blend zone.
+                // The seeded roll keeps the same boundary deterministic on rebuild.
+                if (rand() < biomeBlendAt(z)) continue;
 
                 normalAt(x, z, _normal);
                 // normalY falls as the ground steepens; reject cliffs.

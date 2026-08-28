@@ -5,6 +5,7 @@ import { createDesertProp, createDesertPropMaterial, type DesertPropVariant } fr
 import { heightAt, normalAt } from '../procedural/heightField';
 import { hashChunk, mulberry32 } from '../procedural/random';
 import { roadCenterX } from './roadPath';
+import { biomeBlendAt } from '../config/environment';
 import type { WorldScroll } from './WorldScroll';
 import type { TreeShadowMask } from './TreeShadowMask';
 
@@ -19,7 +20,7 @@ interface Placement {
 
 const _normal = { x: 0, y: 1, z: 0 };
 
-/** Sparse, deterministic cactus-and-rock scenery for the desert biome. */
+/** Sparse, deterministic cactus scenery for desert sections of the world. */
 export class DesertScatterStreamer {
     private _meshes: InstancedMesh3D[] = [];
     private _variants: DesertPropVariant[] = [];
@@ -96,6 +97,9 @@ export class DesertScatterStreamer {
                 const variant = Math.floor(rand() * c.activeVariants);
                 if (Math.abs(x - roadCenterX(z)) < c.roadClearance) continue;
                 if (DesertScatterStreamer._density(x, z) < c.densityCutoff) continue;
+                // Cacti fade in as trees fade out, without changing after a
+                // streamed chunk is recycled and rebuilt.
+                if (rand() >= biomeBlendAt(z)) continue;
                 normalAt(x, z, _normal);
                 if (_normal.y < minNormalY) continue;
                 const rock = this._variants[variant].rock;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
-import { environmentSkyPreset } from '../../config/environment';
+import { activeEnvironmentBlend, environmentSkyPreset } from '../../config/environment';
 import { deriveFogColor } from './skyModel';
 
 /**
@@ -58,18 +58,19 @@ export function dayFactor(): number {
  * @deprecated Kept as a thin alias so older call sites still read. The fog is no
  * longer "the horizon colour" — see `skyModel.deriveFogColor`.
  */
-export function effectiveHorizonColor(): THREE.Color {
-    return deriveFogColor();
+export function effectiveHorizonColor(environmentBlend = activeEnvironmentBlend()): THREE.Color {
+    return deriveFogColor(environmentBlend);
 }
 
 export class SkyDome {
 
     private _mesh: THREE.Mesh;
     private _material: THREE.ShaderMaterial;
+    private _paletteScratch = new THREE.Color();
 
     constructor(scene: THREE.Scene) {
         const s = cfg.sky;
-        const palette = environmentSkyPreset();
+        const palette = environmentSkyPreset('forest');
         // The TRUE sun and moon, not the lighting direction — the dome has to
         // draw the moon while gating the sun's glow off, so it needs both
         // regardless of which one is lighting the scene.
@@ -107,16 +108,24 @@ export class SkyDome {
         // moving with the camera every frame is wasted work.
         this._mesh.frustumCulled = false;
         scene.add(this._mesh);
+        this.refreshEnvironment();
     }
 
     /** Repaints the dome without rebuilding its geometry or shader program. */
-    refreshEnvironment(): void {
-        const palette = environmentSkyPreset();
-        (this._material.uniforms.uZenithColor.value as THREE.Color).set(palette.zenith);
-        (this._material.uniforms.uZenithLowColor.value as THREE.Color).set(palette.zenithLow);
-        (this._material.uniforms.uHorizonColor.value as THREE.Color).set(palette.horizon);
-        (this._material.uniforms.uHorizonSunsetColor.value as THREE.Color).set(palette.horizonLow);
-        (this._material.uniforms.uSunGlowColor.value as THREE.Color).set(palette.glow);
+    refreshEnvironment(blend = activeEnvironmentBlend()): void {
+        const forest = environmentSkyPreset('forest');
+        const desert = environmentSkyPreset('desert');
+        this._blendUniform('uZenithColor', forest.zenith, desert.zenith, blend);
+        this._blendUniform('uZenithLowColor', forest.zenithLow, desert.zenithLow, blend);
+        this._blendUniform('uHorizonColor', forest.horizon, desert.horizon, blend);
+        this._blendUniform('uHorizonSunsetColor', forest.horizonLow, desert.horizonLow, blend);
+        this._blendUniform('uSunGlowColor', forest.glow, desert.glow, blend);
+    }
+
+    private _blendUniform(name: string, forest: number, desert: number, blend: number): void {
+        (this._material.uniforms[name].value as THREE.Color)
+            .set(forest)
+            .lerp(this._paletteScratch.set(desert), blend);
     }
 
     /**

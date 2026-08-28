@@ -38,4 +38,11 @@ export class EnvironmentToggle {
         this._label.color = cfg.environmentToggle.color;
         this._label.text = `${cfg.environmentToggle.prefix}: ${cfg.environmentToggle.labels[this._current]}`;
     }
+
+    /** Lets the automatic distance-based cycle keep the label in sync. */
+    setCurrent(current: EnvironmentId): void {
+        if (current === this._current) return;
+        this._current = current;
+        this._refresh();
+    }
 }

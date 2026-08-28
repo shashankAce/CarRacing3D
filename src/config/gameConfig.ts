@@ -41,9 +41,23 @@ export const gameConfig = {
         },
     },
 
-    /** Environment selection metadata; visual values live in the blocks below. */
+    /** Environment sequencing metadata; visual values live in the blocks below. */
     environment: {
         default: 'forest',
+        /**
+         * Alternates biomes along absolute travel distance. The solid lengths
+         * exclude the blend on either side, so a cycle is:
+         * forest -> transition -> desert -> transition -> repeat.
+         */
+        cycle: {
+            enabled: true,
+            /** Metres of fully forest terrain before it starts drying out. */
+            forestLength: 320,
+            /** Metres of fully desert terrain before vegetation returns. */
+            desertLength: 320,
+            /** Metres used by each smooth forest/desert cross-fade. */
+            transitionLength: 160,
+        },
     },
 
     /** Runtime-selectable colour palettes. Terrain shape lives in `terrain.presets`. */

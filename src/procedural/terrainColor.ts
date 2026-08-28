@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../config/gameConfig';
-import { activeEnvironment, environmentTerrainPreset } from '../config/environment';
+import { biomeBlendAt, environmentTerrainPreset, type EnvironmentId } from '../config/environment';
 import { smoothstep } from './math';
 import { sandWindPatternAt } from './sandWind';
 
@@ -85,22 +85,21 @@ const SLOPE_THRESHOLDS = {
     },
 };
 
-export function terrainColorAt(
+const _forestColor = { r: 0, g: 0, b: 0 };
+const _desertColor = { r: 0, g: 0, b: 0 };
+
+function biomeColorAt(
+    environment: EnvironmentId,
     x: number,
     y: number,
     z: number,
     normalY: number,
     out: { r: number; g: number; b: number },
 ): void {
-    const environment = activeEnvironment();
     const palette = PALETTES[environment];
     const slopes = SLOPE_THRESHOLDS[environment];
     const preset = environmentTerrainPreset(environment);
     const dirtT = smoothstep(slopes.dirtStart, slopes.dirtFull, normalY);
-    // Rock from steepness OR from altitude, whichever is stronger. Slope alone
-    // is enough for hills, but a mountain has broad gentle flanks high up that
-    // would otherwise stay bright grass — and a green mountain reads wrong when
-    // the whole point of raising the terrain was to get rock.
     const rockT = Math.max(
         smoothstep(slopes.rockStart, slopes.rockFull, normalY),
         smoothstep(preset.rockAltitudeStart, preset.rockAltitudeFull, y),
@@ -112,14 +111,11 @@ export function terrainColorAt(
         return;
     }
 
-    // Height ramp: darker green in the hollows, lighter on the rises.
-    const amp = preset.amplitude;
-    const heightT = smoothstep(-amp, amp, y);
+    const heightT = smoothstep(-preset.amplitude, preset.amplitude, y);
     let r = palette.low.r + (palette.high.r - palette.low.r) * heightT;
     let g = palette.low.g + (palette.high.g - palette.low.g) * heightT;
     let b = palette.low.b + (palette.high.b - palette.low.b) * heightT;
 
-    // Slope ramps: grass → dirt → bare rock as the ground steepens.
     r += (palette.dirt.r - r) * dirtT;
     g += (palette.dirt.g - g) * dirtT;
     b += (palette.dirt.b - b) * dirtT;
@@ -138,4 +134,28 @@ export function terrainColorAt(
         out.g *= contrast;
         out.b *= contrast;
     }
+}
+
+export function terrainColorAt(
+    x: number,
+    y: number,
+    z: number,
+    normalY: number,
+    out: { r: number; g: number; b: number },
+): void {
+    const desertBlend = biomeBlendAt(z);
+    if (desertBlend <= 0) {
+        biomeColorAt('forest', x, y, z, normalY, out);
+        return;
+    }
+    if (desertBlend >= 1) {
+        biomeColorAt('desert', x, y, z, normalY, out);
+        return;
+    }
+
+    biomeColorAt('forest', x, y, z, normalY, _forestColor);
+    biomeColorAt('desert', x, y, z, normalY, _desertColor);
+    out.r = _forestColor.r + (_desertColor.r - _forestColor.r) * desertBlend;
+    out.g = _forestColor.g + (_desertColor.g - _forestColor.g) * desertBlend;
+    out.b = _forestColor.b + (_desertColor.b - _forestColor.b) * desertBlend;
 }

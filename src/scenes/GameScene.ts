@@ -24,7 +24,13 @@ import { CollisionDebugDraw } from '../ui/CollisionDebugDraw';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
 import { VehicleModels, type VehicleModelId } from '../assets/VehicleModels';
-import { activeEnvironment, toggleEnvironment, type EnvironmentId } from '../config/environment';
+import {
+    activeEnvironment,
+    activeEnvironmentBlend,
+    setEnvironmentPosition,
+    toggleEnvironment,
+    type EnvironmentId,
+} from '../config/environment';
 
 /**
  * GameScene — Phase 5: player throttle and fuel.
@@ -75,6 +81,7 @@ export class GameScene extends Scene {
     private _sun: DirectionalLight3D;
     private _sky: SkyDome;
     private _clouds: CloudSprites;
+    private _lastEnvironmentBlend = Number.NaN;
 
     onLoad(): void {
         // Idempotent — the engine config already ran this, but calling it here
@@ -84,6 +91,7 @@ export class GameScene extends Scene {
 
         // Both derived from the dome's own horizon, so distant terrain fades
         // into exactly the colour the sky shows behind it at any sun angle.
+        setEnvironmentPosition(0);
         const horizon = effectiveHorizonColor();
         sys.scene.background = horizon;
         // No wrapper for fog by design — it has no lifecycle to manage.
@@ -142,8 +150,10 @@ export class GameScene extends Scene {
         // at a time.
         this._scatter = new ScatterStreamer(this, this._state.scroll);
         this._desertScatter = new DesertScatterStreamer(this, this._state.scroll);
-        this._scatter.setVisible(activeEnvironment() === 'forest');
-        this._desertScatter.setVisible(activeEnvironment() === 'desert');
+        // Both pools stay live: their placement density cross-fades spatially
+        // through each forest/desert transition.
+        this._scatter.setVisible(true);
+        this._desertScatter.setVisible(true);
         this._terrain.buildAllNow();
         this._road.update();
         // Registered before the first scatter sync, which is what feeds it.
@@ -276,6 +286,9 @@ export class GameScene extends Scene {
         if (this._state.isRunning) {
             this._state.update(dt, this._input.throttle);
             const travelled = this._state.scroll.travelled;
+            setEnvironmentPosition(travelled);
+            this._refreshEnvironmentSky();
+            this._environmentToggle.setCurrent(activeEnvironment());
             // The car's world Z is `travelled` — it always renders at z ≈ 0.
             this._car.update(dt, this._input.axis, travelled, this._state.speed);
             this._traffic.update(dt, travelled, this._state.speedT, this._car.position.x);
@@ -341,32 +354,39 @@ export class GameScene extends Scene {
      */
     private _syncScatter(): void {
         const keys = this._terrain.liveChunkKeys();
-        if (activeEnvironment() === 'desert') {
-            this._desertScatter.update(keys, TerrainStreamer.decodeKey);
-        } else {
-            this._scatter.update(keys, TerrainStreamer.decodeKey);
-        }
+        this._scatter.update(keys, TerrainStreamer.decodeKey);
+        this._desertScatter.update(keys, TerrainStreamer.decodeKey);
     }
 
     /** Swaps the complete visual biome while preserving the current run state. */
     private _switchEnvironment(): EnvironmentId {
         const id = toggleEnvironment();
         this._discardSelectionTap = true;
-        this._scatter.setVisible(id === 'forest');
-        this._desertScatter.setVisible(id === 'desert');
 
-        // Terrain colour and sand ripples are baked per vertex, so rebuild the resident pool now.
+        // The manual button jumps the cycle anchor for art/debug inspection.
+        // Terrain colour and sand ripples are baked, so resident chunks follow it.
         this._terrain.refreshAllNow();
-        if (id === 'forest') this._scatter.reset();
-        else this._desertScatter.reset();
+        this._scatter.reset();
+        this._desertScatter.reset();
         this._syncScatter();
 
-        this._sky.refreshEnvironment();
-        const horizon = effectiveHorizonColor();
+        this._refreshEnvironmentSky(true);
+        return id;
+    }
+
+    /** Smoothly follows the biome mix under the player without rebuilding the dome. */
+    private _refreshEnvironmentSky(force = false): void {
+        const blend = activeEnvironmentBlend();
+        // Fog derivation samples the forward sky arc. Updating every half-percent
+        // is visually continuous while avoiding that CPU work on every frame.
+        if (!force && Math.abs(blend - this._lastEnvironmentBlend) < 0.005) return;
+
+        this._lastEnvironmentBlend = blend;
+        this._sky.refreshEnvironment(blend);
+        const horizon = effectiveHorizonColor(blend);
         this.threeSceneSystem.scene.background = horizon;
         const fog = this.threeSceneSystem.scene.fog;
         if (fog instanceof THREE.FogExp2) fog.color.copy(horizon);
-        return id;
     }
 
     private _endRun(title: string): void {
@@ -384,6 +404,9 @@ export class GameScene extends Scene {
     private _restart(): void {
         this._gameOver.hide();
         this._state.reset();
+        setEnvironmentPosition(this._state.scroll.travelled);
+        this._refreshEnvironmentSky(true);
+        this._environmentToggle.setCurrent(activeEnvironment());
         this._car.reset();
         this._traffic.reset();
         // A finger may still be down from the restart tap; without this the car

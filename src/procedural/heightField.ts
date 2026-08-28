@@ -1,7 +1,7 @@
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadLevelAt } from '../world/roadPath';
 import { smoothstep, lerp } from './math';
-import { activeEnvironment, environmentTerrainPreset } from '../config/environment';
+import { biomeBlendAt } from '../config/environment';
 import { sandWindPatternAt } from './sandWind';
 
 /**
@@ -81,8 +81,15 @@ function ridge(u: number, v: number): number {
  * roadside. `centreX` is the road centre at this z, passed in rather than
  * recomputed — it's already hoisted out of the chunk builder's inner loop.
  */
-function mountainMask(x: number, z: number, centreX: number): number {
-    const m = environmentTerrainPreset().mountains;
+type TerrainPreset = typeof cfg.terrain.presets.forest;
+
+function mountainMask(
+    x: number,
+    z: number,
+    centreX: number,
+    preset: TerrainPreset,
+): number {
+    const m = preset.mountains;
     const rf = m.regionFrequency;
     const region = octave(x * rf, z * rf) / 1.4 * 0.5 + 0.5;
     const regionMask = smoothstep(m.threshold - m.thresholdBand, m.threshold + m.thresholdBand, region);
@@ -100,13 +107,12 @@ function mountainMask(x: number, z: number, centreX: number): number {
  * small high-frequency octave is what makes terrain read as ground rather than
  * as a tinted plane.
  */
-export function ambientHeightAt(x: number, z: number, centreX: number): number {
-    const preset = environmentTerrainPreset();
+function biomeHeightAt(x: number, z: number, centreX: number, preset: TerrainPreset): number {
     const f = preset.baseFrequency;
     const a = preset.amplitude;
     const m = preset.mountains;
 
-    const mask = mountainMask(x, z, centreX);
+    const mask = mountainMask(x, z, centreX, preset);
 
     // Hills are damped inside a mountain region so their bumps don't fight the
     // ridge's shape — P3W does the same, for the same reason.
@@ -131,10 +137,24 @@ export function ambientHeightAt(x: number, z: number, centreX: number): number {
         terrain += mask * (r * m.amplitude + mask * m.amplitude * 0.35);
     }
 
-    if (activeEnvironment() === 'desert') {
-        terrain += sandWindPatternAt(x, z) * cfg.terrain.presets.desert.windPattern.height;
-    }
     return terrain;
+}
+
+export function ambientHeightAt(x: number, z: number, centreX: number): number {
+    const desertBlend = biomeBlendAt(z);
+    if (desertBlend <= 0) {
+        return biomeHeightAt(x, z, centreX, cfg.terrain.presets.forest);
+    }
+
+    const ripples = sandWindPatternAt(x, z)
+        * cfg.terrain.presets.desert.windPattern.height;
+    if (desertBlend >= 1) {
+        return biomeHeightAt(x, z, centreX, cfg.terrain.presets.desert) + ripples;
+    }
+
+    const forest = biomeHeightAt(x, z, centreX, cfg.terrain.presets.forest);
+    const desert = biomeHeightAt(x, z, centreX, cfg.terrain.presets.desert) + ripples;
+    return lerp(forest, desert, desertBlend);
 }
 
 /**

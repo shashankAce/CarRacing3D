@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
-import { environmentSkyPreset } from '../../config/environment';
+import { activeEnvironmentBlend, environmentSkyPreset } from '../../config/environment';
 
 /**
  * skyModel — the dome's shading, on the CPU.
@@ -53,20 +53,49 @@ const norm = (v: [number, number, number]): [number, number, number] => {
     return [v[0] / l, v[1] / l, v[2] / l];
 };
 
+// Reused palette colours: fog derivation evaluates the model dozens of times,
+// so allocating several THREE.Color objects per sample would create avoidable
+// garbage throughout every biome transition.
+const _horizonLow = new THREE.Color();
+const _horizonHigh = new THREE.Color();
+const _zenithLow = new THREE.Color();
+const _zenithHigh = new THREE.Color();
+const _glow = new THREE.Color();
+const _paletteScratch = new THREE.Color();
+const _moonColor = new THREE.Color();
+
+function blendPaletteColor(
+    out: THREE.Color,
+    forest: number,
+    desert: number,
+    blend: number,
+): THREE.Color {
+    return out.set(forest).lerp(_paletteScratch.set(desert), blend);
+}
+
 /**
  * Sky colour for a direction, in LINEAR space, matching the dome's shader term
  * for term. Clamped per channel because the framebuffer clamps too — an
  * unclamped average would be pulled around by glow values the screen never
  * actually shows.
  */
-export function skyColorAt(dir: [number, number, number], out: THREE.Color = new THREE.Color()): THREE.Color {
+export function skyColorAt(
+    dir: [number, number, number],
+    out: THREE.Color = new THREE.Color(),
+    environmentBlend = activeEnvironmentBlend(),
+): THREE.Color {
     const s = cfg.sky;
-    const palette = environmentSkyPreset();
+    const forest = environmentSkyPreset('forest');
+    const desert = environmentSkyPreset('desert');
     const d = norm(dir);
     const day = Math.max(0, Math.min(1, s.dayFactor));
 
-    const horizon = new THREE.Color(palette.horizonLow).lerp(new THREE.Color(palette.horizon), day);
-    const zenith = new THREE.Color(palette.zenithLow).lerp(new THREE.Color(palette.zenith), day);
+    blendPaletteColor(_horizonLow, forest.horizonLow, desert.horizonLow, environmentBlend);
+    blendPaletteColor(_horizonHigh, forest.horizon, desert.horizon, environmentBlend);
+    blendPaletteColor(_zenithLow, forest.zenithLow, desert.zenithLow, environmentBlend);
+    blendPaletteColor(_zenithHigh, forest.zenith, desert.zenith, environmentBlend);
+    const horizon = _horizonLow.lerp(_horizonHigh, day);
+    const zenith = _zenithLow.lerp(_zenithHigh, day);
 
     const t = Math.pow(smoothstep(s.skyTopHeight, Math.max(d[1], 0)), s.horizonHold);
     out.copy(horizon).lerp(zenith, t);
@@ -85,11 +114,11 @@ export function skyColorAt(dir: [number, number, number], out: THREE.Color = new
     const moonTerm = moonUp * (Math.pow(moonDot, m.discExp) * m.discAmp
         + Math.pow(moonDot, m.haloExp) * m.haloAmp);
 
-    const glow = new THREE.Color(palette.glow);
-    const moonColor = new THREE.Color(cfg.lighting.moonColor);
-    out.r = Math.min(1, out.r + glow.r * sunTerm + moonColor.r * moonTerm);
-    out.g = Math.min(1, out.g + glow.g * sunTerm + moonColor.g * moonTerm);
-    out.b = Math.min(1, out.b + glow.b * sunTerm + moonColor.b * moonTerm);
+    blendPaletteColor(_glow, forest.glow, desert.glow, environmentBlend);
+    _moonColor.set(cfg.lighting.moonColor);
+    out.r = Math.min(1, out.r + _glow.r * sunTerm + _moonColor.r * moonTerm);
+    out.g = Math.min(1, out.g + _glow.g * sunTerm + _moonColor.g * moonTerm);
+    out.b = Math.min(1, out.b + _glow.b * sunTerm + _moonColor.b * moonTerm);
     return out;
 }
 
@@ -98,13 +127,13 @@ export function skyColorAt(dir: [number, number, number], out: THREE.Color = new
  * meets it — the forward arc, from just below the horizon to a few degrees above,
  * which is where the terrain draw edge and the tree line sit.
  */
-export function deriveFogColor(): THREE.Color {
+export function deriveFogColor(environmentBlend = activeEnvironmentBlend()): THREE.Color {
     const arc = cfg.sky.fogSampleArcDegrees;
     const scratch = new THREE.Color();
     let r = 0, g = 0, b = 0, n = 0;
     for (let a = -arc; a <= arc + 1e-6; a += arc / 8) {
         for (const el of [-1, 0, 1, 2, 3]) {
-            skyColorAt(direction(180 + a, el), scratch);
+            skyColorAt(direction(180 + a, el), scratch, environmentBlend);
             r += scratch.r; g += scratch.g; b += scratch.b; n++;
         }
     }
