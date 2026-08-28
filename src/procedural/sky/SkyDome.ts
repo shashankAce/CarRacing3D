@@ -143,8 +143,15 @@ export class SkyDome {
 
 const VERTEX_SHADER = /* glsl */`
 varying vec3 vLocalPosition;
+varying vec3 vViewDirection;
+varying vec3 vMoonViewDirection;
+uniform vec3 uMoonDirection;
 void main() {
     vLocalPosition = position;
+    // Direction vectors use w=0 semantics: camera/object translation must not
+    // affect either the sampled sky ray or the moon's celestial direction.
+    vViewDirection = mat3(modelViewMatrix) * position;
+    vMoonViewDirection = mat3(viewMatrix) * uMoonDirection;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -156,19 +163,28 @@ void main() {
  */
 function buildFragmentShader(): string {
     const g = cfg.sky.sunGlow, m = cfg.sky.moonGlow;
+    // The config keeps angular edges as dot products because skyModel.ts uses
+    // them directly.  The GPU converts those angles to projected view-space
+    // radii so the disc stays circular away from the centre of the screen.
+    const moonInnerRadius = Math.sqrt(1 - m.discInnerDot ** 2) / m.discInnerDot;
+    const moonOuterRadius = Math.sqrt(1 - m.discOuterDot ** 2) / m.discOuterDot;
+    // The old mask blurred across the whole inner-to-outer interval (roughly a
+    // quarter of the disc radius). Keep its perceived size, but let fwidth()
+    // make the transition exactly as wide as the current screen pixels need.
+    const moonRadius = (moonInnerRadius + moonOuterRadius) * 0.5;
     return FRAGMENT_SHADER
         .replace(/SUN_BROAD_EXP/g, g.broadExp.toFixed(1))
         .replace(/SUN_BROAD_AMP/g, g.broadAmp.toFixed(4))
         .replace(/SUN_TIGHT_EXP/g, g.tightExp.toFixed(1))
         .replace(/SUN_TIGHT_AMP/g, g.tightAmp.toFixed(4))
-        .replace(/MOON_DISC_EXP/g, m.discExp.toFixed(1))
         .replace(/MOON_DISC_AMP/g, m.discAmp.toFixed(4))
-        .replace(/MOON_HALO_EXP/g, m.haloExp.toFixed(1))
-        .replace(/MOON_HALO_AMP/g, m.haloAmp.toFixed(4));
+        .replace(/MOON_DISC_RADIUS/g, moonRadius.toFixed(8));
 }
 
 const FRAGMENT_SHADER = /* glsl */`
 varying vec3 vLocalPosition;
+varying vec3 vViewDirection;
+varying vec3 vMoonViewDirection;
 uniform vec3 uZenithColor;
 uniform vec3 uZenithLowColor;
 uniform vec3 uHorizonColor;
@@ -180,6 +196,35 @@ uniform vec3 uMoonColor;
 uniform float uSkyTopHeight;
 uniform float uHorizonHold;
 uniform float uDayFactor;
+
+// A few layered maria and crater bowls give the small disc readable lunar
+// detail without adding a texture file, sampler, or download to the playable.
+float moonCrater(vec2 p, vec2 centre, float radius) {
+    float d = length(p - centre) / radius;
+    float bowl = 1.0 - smoothstep(0.18, 0.92, d);
+    float rim = smoothstep(0.70, 0.91, d) * (1.0 - smoothstep(0.91, 1.16, d));
+    return rim * 0.13 - bowl * 0.17;
+}
+
+float moonSurface(vec2 p) {
+    float tone = 0.76;
+
+    // Broad overlapping waves read as the moon's dark basalt plains at this
+    // size; unlike high-frequency noise, they survive mobile resolution scale.
+    tone += sin(p.x * 5.7 + p.y * 2.3) * 0.035;
+    tone += sin(p.x * 9.1 - p.y * 6.4 + 1.7) * 0.025;
+    tone += moonCrater(p, vec2(-0.34,  0.28), 0.24);
+    tone += moonCrater(p, vec2( 0.28,  0.37), 0.16);
+    tone += moonCrater(p, vec2( 0.38, -0.18), 0.22);
+    tone += moonCrater(p, vec2(-0.15, -0.36), 0.13);
+    tone += moonCrater(p, vec2(-0.50, -0.18), 0.10);
+    tone += moonCrater(p, vec2( 0.05,  0.05), 0.08);
+
+    // Gentle limb darkening makes the flat shader disc read as a sphere.
+    float limb = sqrt(max(0.0, 1.0 - dot(p, p)));
+    tone *= mix(0.66, 1.0, smoothstep(0.0, 0.48, limb));
+    return clamp(tone, 0.38, 0.96);
+}
 
 void main() {
     vec3 dir = normalize(vLocalPosition);
@@ -227,12 +272,34 @@ void main() {
     float sunDot = max(dot(dir, normalize(uSunDirection)), 0.0);
     sky += uSunGlowColor * sunUp * (pow(sunDot, SUN_BROAD_EXP) * SUN_BROAD_AMP + pow(sunDot, SUN_TIGHT_EXP) * SUN_TIGHT_AMP);
 
-    // The moon: a tight disc plus a soft halo, gated the same way. A lobe falls
-    // to half at sqrt(2*ln2/exp) radians, so the exponent sets its angular size
-    // and does the work a texture would, for a few ALU.
+    // The moon is a solid disc with a sub-pixel softened rim, not a radial
+    // intensity lobe. That keeps the moon lit without a sun-like halo.
     float moonUp = smoothstep(-0.02, 0.05, uMoonDirection.y);
-    float moonDot = max(dot(dir, normalize(uMoonDirection)), 0.0);
-    sky += uMoonColor * moonUp * (pow(moonDot, MOON_DISC_EXP) * MOON_DISC_AMP + pow(moonDot, MOON_HALO_EXP) * MOON_HALO_AMP);
+    // Measuring an angular cap with dot(dir, moon) makes it project as an oval
+    // when it is away from the optical axis. Compare perspective-divided view
+    // directions instead: x/-z and y/-z have the same pixel scale, regardless
+    // of viewport aspect ratio, so this distance is a true screen-space circle.
+    vec3 viewDir = normalize(vViewDirection);
+    vec3 moonViewDir = normalize(vMoonViewDirection);
+    vec2 screenDir = viewDir.xy / max(-viewDir.z, 0.0001);
+    vec2 moonScreenDir = moonViewDir.xy / max(-moonViewDir.z, 0.0001);
+    vec2 moonOffset = screenDir - moonScreenDir;
+    float moonScreenDistance = length(moonOffset);
+    // fwidth tracks one screen pixel, so the edge is crisp at every resolution
+    // but still anti-aliased instead of stair-stepped.
+    float moonEdgeAA = max(fwidth(moonScreenDistance) * 0.65, 0.000001);
+    float moonDisc = 1.0 - smoothstep(
+        MOON_DISC_RADIUS - moonEdgeAA,
+        MOON_DISC_RADIUS + moonEdgeAA,
+        moonScreenDistance
+    );
+    // A direction behind the camera also has projected x/y coordinates; mask
+    // it explicitly so it cannot mirror a false moon into the visible sky.
+    moonDisc *= 1.0 - step(-0.0001, moonViewDir.z);
+    if (moonDisc > 0.0) {
+        float lunarTexture = moonSurface(moonOffset / MOON_DISC_RADIUS);
+        sky += uMoonColor * lunarTexture * moonUp * moonDisc * MOON_DISC_AMP;
+    }
 
     gl_FragColor = vec4(sky, 1.0);
 

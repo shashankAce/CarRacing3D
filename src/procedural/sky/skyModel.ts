@@ -111,8 +111,7 @@ export function skyColorAt(
     const moonUp = smoothrange(-0.02, 0.05, moon[1]);
     const moonDot = Math.max(0, d[0] * moon[0] + d[1] * moon[1] + d[2] * moon[2]);
     const m = s.moonGlow;
-    const moonTerm = moonUp * (Math.pow(moonDot, m.discExp) * m.discAmp
-        + Math.pow(moonDot, m.haloExp) * m.haloAmp);
+    const moonTerm = moonUp * smoothrange(m.discOuterDot, m.discInnerDot, moonDot) * m.discAmp;
 
     blendPaletteColor(_glow, forest.glow, desert.glow, environmentBlend);
     _moonColor.set(cfg.lighting.moonColor);

@@ -1554,12 +1554,15 @@ export const gameConfig = {
             tightAmp: 1.6,
             tightExp: 1820,
         },
-        /** Moon disc and halo, same form. 8000 is a ~1.6 degree disc. */
+        /**
+         * A solid lunar disc, expressed as dot-product edges. Unlike a pow()
+         * lobe, this has no falloff around the rim that can read as a glow.
+         * The 0.50°–0.66° radius includes a narrow anti-aliased edge only.
+         */
         moonGlow: {
             discAmp: 1.6,
-            discExp: 8000,
-            haloAmp: 0.06,
-            haloExp: 300,
+            discInnerDot: 0.999846,
+            discOuterDot: 0.999735,
         },
         /**
          * Half-width of the arc the FOG COLOUR is averaged over, degrees, at the
