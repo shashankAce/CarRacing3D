@@ -21,7 +21,7 @@ export interface VehicleVisual {
 
 type VehicleSpec = typeof cfg.vehicles.models[number];
 type VehicleMaterialKey = 'PixelColors' | 'Glass' | 'Headlights' | 'Wheel' | 'Fallback';
-type VehicleDetail = 'full' | 'distant';
+type VehicleDetail = 'full' | 'distant' | 'showroom';
 
 interface VehicleTemplate {
     /** One renderable static mesh per material class for each supported tier. */
@@ -104,7 +104,11 @@ export class VehicleModels {
         return spec;
     }
 
-    create(id: VehicleModelId, detail: VehicleDetail = 'full'): VehicleVisual {
+    create(
+        id: VehicleModelId,
+        detail: VehicleDetail = 'full',
+        includeShadowGeometries = true,
+    ): VehicleVisual {
         const template = this._templates.get(id);
         if (!template || !this._palette) throw new Error(`Vehicle model "${id}" has not loaded.`);
 
@@ -130,9 +134,11 @@ export class VehicleModels {
         // Shadow capture still receives all original triangles. Clones are
         // intentional: traffic shifts its first visual's capture geometry into
         // its centre-origin group, and must never mutate shared render geometry.
-        const shadowGeometries = [...geometries.values()].map((geometry) => geometry.clone());
+        const shadowGeometries = includeShadowGeometries
+            ? [...geometries.values()].map((geometry) => geometry.clone())
+            : [];
         let spinWheels: (distance: number) => void = () => {};
-        if (this._testWheel && template.wheels.length > 0) {
+        if (detail !== 'showroom' && this._testWheel && template.wheels.length > 0) {
             const material = this._createMaterial('Wheel');
             const wheels = new THREE.InstancedMesh(this._testWheel, material, template.wheels.length);
             root.add(wheels);
@@ -159,9 +165,11 @@ export class VehicleModels {
 
             // Projected-shadow capture needs ordinary world-local geometries,
             // not instance matrices. Capture the zero-rotation wheel pose.
-            for (const wheel of template.wheels) {
-                matrix.compose(wheel.centre, new THREE.Quaternion(), wheel.scale).multiply(offset);
-                shadowGeometries.push(this._testWheel.clone().applyMatrix4(matrix));
+            if (includeShadowGeometries) {
+                for (const wheel of template.wheels) {
+                    matrix.compose(wheel.centre, new THREE.Quaternion(), wheel.scale).multiply(offset);
+                    shadowGeometries.push(this._testWheel.clone().applyMatrix4(matrix));
+                }
             }
         }
 
@@ -185,13 +193,14 @@ export class VehicleModels {
         const batches: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry[]>> = {
             full: new Map(),
             distant: new Map(),
+            showroom: new Map(),
         };
         const wheels: WheelPlacement[] = [];
         model.traverse((object) => {
             if (!(object instanceof THREE.Mesh)) return;
-            if (this._testWheel && WHEEL_NAMES.has(object.name)) {
+            const replacesOriginalWheel = Boolean(this._testWheel && WHEEL_NAMES.has(object.name));
+            if (replacesOriginalWheel) {
                 wheels.push(this._fitTestWheel(object));
-                return;
             }
             const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
             const groups = object.geometry.groups.length > 0
@@ -199,6 +208,14 @@ export class VehicleModels {
                 : [{ start: 0, count: object.geometry.getIndex()?.count ?? object.geometry.getAttribute('position').count, materialIndex: 0 }];
             for (const group of groups) {
                 const key = this._materialKey(sourceMaterials[group.materialIndex]?.name);
+                // The showroom always keeps the authored FBX wheels. Gameplay's
+                // full/distant tiers may replace them with the configured test
+                // wheel, so it needs an independent pristine material batch.
+                const showroomPart = sliceGroup(object.geometry, group.start, group.count);
+                showroomPart.applyMatrix4(object.matrixWorld);
+                this._appendBatch(batches.showroom, key, showroomPart);
+                if (replacesOriginalWheel) continue;
+
                 const part = sliceGroup(object.geometry, group.start, group.count);
                 // This leaves every compact mesh in the vehicle root's local
                 // space, exactly matching the old hierarchy after normalisation.
@@ -220,8 +237,9 @@ export class VehicleModels {
         const geometries: Record<VehicleDetail, Map<VehicleMaterialKey, THREE.BufferGeometry>> = {
             full: new Map(),
             distant: new Map(),
+            showroom: new Map(),
         };
-        for (const detail of ['full', 'distant'] as const) {
+        for (const detail of ['full', 'distant', 'showroom'] as const) {
             for (const key of MATERIAL_ORDER) {
                 const parts = batches[detail].get(key);
                 if (parts && parts.length > 0) geometries[detail].set(key, mergeStaticParts(parts));

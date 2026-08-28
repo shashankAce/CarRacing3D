@@ -779,11 +779,11 @@ export const gameConfig = {
         models: [
             // Player-only performance. Values are metres/second and m/s²;
             // traffic continues to use its independent `traffic.types` speeds.
-            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 120, accelerate: 8.2, brake: 16, autoBrake: 14 } },
-            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60, speed: { start: 28, min: 18, max: 66, accelerate: 6.6, brake: 14, autoBrake: 11 } },
-            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 75, accelerate: 7.2, brake: 14, autoBrake: 13 } },
-            // { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
-            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
+            { id: 'sport', label: 'SPORT', description: 'Track-bred pace with instant response.', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 120, accelerate: 8.2, brake: 16, autoBrake: 14 } },
+            { id: 'sedan', label: 'SEDAN', description: 'Balanced, stable and easy to control.', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60, speed: { start: 28, min: 18, max: 66, accelerate: 6.6, brake: 14, autoBrake: 11 } },
+            { id: 'car', label: 'COUPE', description: 'Agile handling with strong acceleration.', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 75, accelerate: 7.2, brake: 14, autoBrake: 13 } },
+            { id: 'jeep', label: 'JEEP', description: 'Rugged, confident and ready for rough roads.', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
+            { id: 'microbus', label: 'MICRO BUS', description: 'Heavy, dependable and built for control.', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
         ],
         materials: {
             pixelColors: { roughness: 0.22, metalness: 0.05 },
@@ -792,23 +792,122 @@ export const gameConfig = {
         },
     },
 
-    /** The selection UI is content-driven alongside the vehicles themselves. */
+    /**
+     * Optional, self-contained pre-race showroom. Set `enabled` false to skip
+     * every showroom interaction and start directly with `vehicles.playerDefault`.
+     */
     carSelect: {
-        title: 'CHOOSE YOUR CAR',
+        enabled: true,
+        title: 'SELECT YOUR RIDE',
+        eyebrow: 'PRIVATE SHOWROOM',
         loadingText: 'LOADING CARS…',
-        hint: 'TAP A CAR TO RACE',
-        titleY: 1020,
-        hintY: 920,
-        firstChoiceY: 810,
-        choiceGap: 112,
-        choiceWidth: 420,
-        choiceHeight: 82,
-        titleFontSize: 48,
-        choiceFontSize: 34,
-        hintFontSize: 24,
+        driveText: 'DRIVE THIS CAR',
+        previousGlyph: '◀',
+        nextGlyph: '▶',
+        titleY: 1150,
+        eyebrowY: 1204,
+        carNameY: 1054,
+        descriptionY: 1004,
+        arrowY: 690,
+        arrowEdge: 42,
+        arrowSize: 92,
+        statsPanelY: 310,
+        statsPanelWidth: 620,
+        statsPanelHeight: 260,
+        statsFirstY: 388,
+        statsGap: 70,
+        statLabelX: 122,
+        statBarX: 250,
+        statBarWidth: 300,
+        statBarHeight: 13,
+        statValueX: 605,
+        driveY: 105,
+        driveWidth: 430,
+        driveHeight: 92,
+        titleFontSize: 46,
+        eyebrowFontSize: 18,
+        carNameFontSize: 42,
+        descriptionFontSize: 22,
+        arrowFontSize: 32,
+        statFontSize: 20,
+        statValueFontSize: 18,
+        driveFontSize: 27,
         titleColor: '#ffffff',
-        choiceColor: '#9fe8ff',
-        hintColor: '#c9d9e2',
+        eyebrowColor: '#70dcff',
+        descriptionColor: '#aebdca',
+        arrowColor: '#e9f8ff',
+        arrowBackground: '#132536d9',
+        arrowStroke: '#63d7ff',
+        statsPanelColor: '#07111dcc',
+        statLabelColor: '#b9c8d4',
+        statValueColor: '#effaff',
+        statTrackColor: '#243544',
+        statFillColor: '#50d8ff',
+        driveColor: '#06131c',
+        driveBackground: '#62ddff',
+        driveStroke: '#c7f5ff',
+        stats: {
+            speedLabel: 'TOP SPEED',
+            accelerationLabel: 'ACCELERATION',
+            brakingLabel: 'BRAKING',
+            maxSpeedKph: 440,
+            maxAcceleration: 9,
+            maxBraking: 18,
+        },
+        showroom: {
+            layer: 1,
+            background: 0x03070d,
+            camera: {
+                fov: 42,
+                minFov: 34,
+                maxFov: 72,
+                /** Keeps roughly 20% clear breathing room on both screen sides. */
+                fitPadding: 1.38,
+                /** Extra framing only for unusually long/tall vehicle silhouettes. */
+                fitOverrides: { microbus: 1.18 } as Record<string, number>,
+                /** Keeps tall vehicles centred vertically instead of aiming near their wheels. */
+                vehicleCenterHeightFactor: 0.5,
+                fovResponse: 7,
+                near: 0.1,
+                far: 60,
+                position: { x: 6.2, y: 3.2, z: 11.4 },
+                target: { x: 0, y: 1.0, z: 0 },
+            },
+            rotationSpeed: 0.16,
+            initialRotation: -0.55,
+            drag: {
+                width: 560,
+                height: 430,
+                centerY: 690,
+                sensitivity: 0.007,
+                autoResumeDelay: 0.1,//seconds
+            },
+            platform: {
+                radius: 3.25,
+                height: 0.36,
+                topY: 0.36,
+                color: 0x18242f,
+                roughness: 0.28,
+                metalness: 0.62,
+                rimColor: 0x4bd9ff,
+                floorColor: 0x070b10,
+                wallColor: 0x09131e,
+            },
+            transition: {
+                duration: 0.55,
+                slideDistance: 4.8,
+            },
+            ambient: { color: 0x71849a, intensity: 0.52 },
+            /** Responsive cones cover the complete rotating vehicle silhouette. */
+            spotlightCoveragePadding: 1.08,
+            spotlightMaxAngle: 1.15,
+            spotlights: [
+                { color: 0xffffff, intensity: 330, distance: 28, angle: 0.48, penumbra: 0.62, position: { x: -4.8, y: 7.2, z: 5.0 } },
+                { color: 0x66cfff, intensity: 250, distance: 25, angle: 0.50, penumbra: 0.72, position: { x: 5.5, y: 5.4, z: 2.2 } },
+                { color: 0xb26cff, intensity: 300, distance: 24, angle: 0.44, penumbra: 0.68, position: { x: 0.4, y: 4.8, z: -5.3 } },
+            ],
+            shadowMapSize: 512,
+        },
     },
 
     /** Startup progress UI and the real work each segment represents. */
@@ -1044,7 +1143,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 4,
+            hour: 16,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it

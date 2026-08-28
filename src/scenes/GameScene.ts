@@ -19,6 +19,7 @@ import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
+import { CarShowroom } from '../ui/CarShowroom';
 import { LoadingScreen, type LoadingStage } from '../ui/LoadingScreen';
 import { EnvironmentToggle } from '../ui/EnvironmentToggle';
 import { FullscreenButton } from '../ui/FullscreenButton';
@@ -72,7 +73,8 @@ export class GameScene extends Scene {
     private _traffic: TrafficSystem;
     private _hud: Hud;
     private _gameOver: GameOverPanel;
-    private _carSelect: CarSelectPanel;
+    private _carSelect: CarSelectPanel | null = null;
+    private _showroom: CarShowroom | null = null;
     private _loading: LoadingScreen;
     private _environmentToggle: EnvironmentToggle;
     private _fullscreenButton: FullscreenButton;
@@ -118,6 +120,7 @@ export class GameScene extends Scene {
             // Startup owns renderer-dependent work so the loading screen can
             // report the real shadow and impostor bake rather than a timer.
             this._renderer = renderer as THREE.WebGLRenderer;
+            if (cfg.carSelect.enabled) this._showroom?.configureRenderer(this._renderer);
         };
 
         this._sky = new SkyDome(sys.scene);
@@ -196,8 +199,19 @@ export class GameScene extends Scene {
         this._hud.setVisible(false);
         this._gameOver = new GameOverPanel(this);
         this._vehicleModels = new VehicleModels();
-        this._carSelect = new CarSelectPanel(this, (id) => this._selectCar(id));
+        if (cfg.carSelect.enabled) {
+            this._showroom = new CarShowroom(sys, this._vehicleModels);
+            this._carSelect = new CarSelectPanel(
+                this,
+                (id, direction) => this._showroom?.select(id, direction) ?? false,
+                (id) => this._selectCar(id),
+                (deltaX) => this._showroom?.rotateBy(deltaX),
+                (dragging) => this._showroom?.setDragging(dragging),
+            );
+            for (const node of this._carSelect.interactiveNodes) this._input.ignoreTapTarget(node);
+        }
         this._environmentToggle = new EnvironmentToggle(this, activeEnvironment(), () => this._switchEnvironment());
+        this._environmentToggle.setVisible(false);
         this._fullscreenButton = new FullscreenButton(this);
         this._input.ignoreTapTarget(this._fullscreenButton.node);
         this._loading = new LoadingScreen(this);
@@ -279,10 +293,9 @@ export class GameScene extends Scene {
         }
 
         if (this._selectingCar) {
-            this._camera.update(dt, this._car, 0);
-            this._updateSun();
-            this._sky.update(this._camera.position);
-            this._clouds.update(dt, this._camera.position);
+            // The showroom owns a separate camera layer and its own lights;
+            // gameplay sky/world/sun are deliberately not updated or rendered.
+            this._showroom?.update(dt);
             return;
         }
 
@@ -502,7 +515,15 @@ export class GameScene extends Scene {
 
         this._startupStage = null;
         this._loading.hide();
-        this._carSelect.show();
+        const defaultVehicle = this._defaultVehicleId();
+        if (cfg.carSelect.enabled) {
+            this._showroom?.show(defaultVehicle);
+            this._carSelect?.show(defaultVehicle);
+        } else {
+            // Plug-and-play bypass: all gameplay setup still flows through the
+            // same selection method, only the showroom interaction is skipped.
+            this._selectCar(defaultVehicle);
+        }
         this._notifyReady();
     }
 
@@ -519,6 +540,11 @@ export class GameScene extends Scene {
         this._reportLoadProgress(total);
     }
 
+    private _defaultVehicleId(): VehicleModelId {
+        return cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.id
+            ?? cfg.vehicles.models[0].id;
+    }
+
     private _selectCar(id: VehicleModelId): void {
         if (!this._vehiclesReady || !this._selectingCar) return;
 
@@ -527,11 +553,13 @@ export class GameScene extends Scene {
         this._car.refreshProjectedGeometry(this._projected);
         this._projected.rebake();
         this._attachPlayerMaterials();
-        this._carSelect.hide();
+        this._carSelect?.hide();
+        this._showroom?.hide();
         this._selectingCar = false;
         this._discardSelectionTap = true;
         this._controls.setEnabled(true);
         this._hud.setVisible(true);
+        this._environmentToggle.setVisible(true);
         // The selection tap is also seen by InputController's global listener;
         // consume it so it cannot trigger an accidental restart later.
         this._restart();
@@ -568,6 +596,8 @@ export class GameScene extends Scene {
     onUnload(): void {
         this._input?.detach();
         this._fullscreenButton?.detach();
+        this._carSelect?.detach();
+        this._showroom?.dispose();
         this._collisionDebug?.dispose();
     }
 }

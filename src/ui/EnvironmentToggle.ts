@@ -39,6 +39,11 @@ export class EnvironmentToggle {
         this._label.text = `${cfg.environmentToggle.prefix}: ${cfg.environmentToggle.labels[this._current]}`;
     }
 
+    /** Gameplay-only control; the isolated showroom has no biome to switch. */
+    setVisible(visible: boolean): void {
+        this.node.active = visible;
+    }
+
     /** Lets the automatic distance-based cycle keep the label in sync. */
     setCurrent(current: EnvironmentId): void {
         if (current === this._current) return;
