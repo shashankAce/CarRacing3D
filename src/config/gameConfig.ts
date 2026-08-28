@@ -1727,6 +1727,15 @@ export const gameConfig = {
      * flip one, reload, look, flip it back.
      */
     debug: {
+        /** Draws the exact player and traffic collision OBBs and dimensions. */
+        collisionBox: {
+            enabled: true,
+            playerColor: 0x39ff88,
+            trafficColor: 0xff9f32,
+            labelColor: '#b8ffd3',
+            labelY: 970,
+            labelFontSize: 22,
+        },
         /**
          * Repaints the terrain by slope band in high-contrast colours instead of
          * the real palette: BLUE where it's grass, GREEN where dirt is blending

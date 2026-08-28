@@ -20,6 +20,7 @@ import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
 import { EnvironmentToggle } from '../ui/EnvironmentToggle';
+import { CollisionDebugDraw } from '../ui/CollisionDebugDraw';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
 import { VehicleModels, type VehicleModelId } from '../assets/VehicleModels';
@@ -65,6 +66,7 @@ export class GameScene extends Scene {
     private _gameOver: GameOverPanel;
     private _carSelect: CarSelectPanel;
     private _environmentToggle: EnvironmentToggle;
+    private _collisionDebug: CollisionDebugDraw | null = null;
     private _vehicleModels: VehicleModels;
     private _vehiclesReady = false;
     private _selectingCar = true;
@@ -152,6 +154,9 @@ export class GameScene extends Scene {
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
         this._traffic.deactivate();
+        if (cfg.debug.collisionBox.enabled) {
+            this._collisionDebug = new CollisionDebugDraw(this, sys.scene, this._car, this._traffic);
+        }
 
         if (cfg.lighting.projectedShadows.enabled) {
             // Casters first: `register` assigns the handles the receiver
@@ -325,6 +330,7 @@ export class GameScene extends Scene {
         this._sky.update(this._camera.position);
         this._clouds.update(dt, this._camera.position);
         this._hud.update(this._state, this._input.hasSteered, this._traffic.cuts);
+        this._collisionDebug?.update();
         this._perf?.update(dt);
     }
 
@@ -456,5 +462,6 @@ export class GameScene extends Scene {
 
     onUnload(): void {
         this._input?.detach();
+        this._collisionDebug?.dispose();
     }
 }

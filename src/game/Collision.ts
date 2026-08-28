@@ -2,51 +2,85 @@ import { gameConfig as cfg } from '../config/gameConfig';
 import type { PlayerCar } from './PlayerCar';
 import type { TrafficSystem, TrafficVehicle } from './TrafficSystem';
 
+export interface CollisionRect {
+    x: number;
+    z: number;
+    halfWidth: number;
+    halfLength: number;
+    yaw: number;
+}
+
+/** Exact 2D oriented-box overlap using the four SAT separating axes. */
+export function orientedBoxesOverlap(a: CollisionRect, b: CollisionRect): boolean {
+    const ac = Math.cos(a.yaw), as = Math.sin(a.yaw);
+    const bc = Math.cos(b.yaw), bs = Math.sin(b.yaw);
+
+    // Each box's local width and length axes in world XZ.
+    const aux = ac, auz = -as, avx = as, avz = ac;
+    const bux = bc, buz = -bs, bvx = bs, bvz = bc;
+
+    // B's axes expressed in A's frame.
+    const r00 = aux * bux + auz * buz;
+    const r01 = aux * bvx + auz * bvz;
+    const r10 = avx * bux + avz * buz;
+    const r11 = avx * bvx + avz * bvz;
+    // Tiny epsilon keeps nearly parallel boxes stable at exact contact.
+    const ar00 = Math.abs(r00) + 1e-8, ar01 = Math.abs(r01) + 1e-8;
+    const ar10 = Math.abs(r10) + 1e-8, ar11 = Math.abs(r11) + 1e-8;
+
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const t0 = dx * aux + dz * auz;
+    const t1 = dx * avx + dz * avz;
+
+    // A width axis, A length axis, B width axis, B length axis.
+    if (Math.abs(t0) > a.halfWidth + b.halfWidth * ar00 + b.halfLength * ar01) return false;
+    if (Math.abs(t1) > a.halfLength + b.halfWidth * ar10 + b.halfLength * ar11) return false;
+    if (Math.abs(t0 * r00 + t1 * r10)
+        > b.halfWidth + a.halfWidth * ar00 + a.halfLength * ar10) return false;
+    if (Math.abs(t0 * r01 + t1 * r11)
+        > b.halfLength + a.halfWidth * ar01 + a.halfLength * ar11) return false;
+    return true;
+}
+
+const _carRect: CollisionRect = { x: 0, z: 0, halfWidth: 0, halfLength: 0, yaw: 0 };
+const _trafficRect: CollisionRect = { x: 0, z: 0, halfWidth: 0, halfLength: 0, yaw: 0 };
+
 /**
- * Collision — axis-aligned overlap between the player and traffic, on the XZ
- * plane.
+ * Collision — oriented rectangle overlap between the player and traffic on XZ.
  *
- * Hand-rolled on purpose (ARCHITECTURE.md §5.5). Everything here is
- * axis-aligned, there is one player against at most sixteen obstacles, and the
- * gameplay is entirely on the ground plane — so this is two interval tests per
- * vehicle. A physics engine would add a fixed-step simulation, bodies to keep in
- * sync, and (for Rapier) 1.5MB of WASM against a 2MB budget, in exchange for
- * nothing this game asks for.
+ * Hand-rolled on purpose (ARCHITECTURE.md §5.5). There is one player against a
+ * tiny fixed traffic pool and gameplay is entirely on the ground plane, so four
+ * separating-axis tests per vehicle are substantially cheaper and simpler than
+ * keeping a full physics simulation in sync.
  *
  * Y is deliberately ignored. Every vehicle sits on the same road surface, so
  * two boxes that overlap in x and z have collided; testing height would only
  * introduce a way to drive through a bus on a slope.
  *
- * Both bodies are tested at their own z. Their boxes stay axis-aligned, but
- * each half-extent is expanded by the body's current yaw so the AABB encloses
- * the complete rotated footprint. This matters both while the player steers
- * and while traffic follows a curve or changes lanes: the collision box must
- * never become smaller than the visible car.
+ * Both boxes rotate with their vehicles. SAT tests the two local axes from
+ * each rectangle, avoiding the false positives produced by the old expanded
+ * AABB when a car was steering or traffic was following a bend.
  */
 export function findCollision(
     car: PlayerCar,
     travelled: number,
     traffic: TrafficSystem,
 ): TrafficVehicle | null {
-    const carX = car.position.x;
     const carWorldZ = travelled - car.position.z;
-    const carYaw = car.rotationY;
-    const carCos = Math.abs(Math.cos(carYaw));
-    const carSin = Math.abs(Math.sin(carYaw));
-    const carHalfW = car.halfWidth * carCos + car.halfLength * carSin;
-    const carHalfL = car.halfWidth * carSin + car.halfLength * carCos;
+    _carRect.x = car.position.x;
+    _carRect.z = carWorldZ;
+    _carRect.halfWidth = car.halfWidth;
+    _carRect.halfLength = car.halfLength;
+    _carRect.yaw = car.rotationY;
 
     for (const v of traffic.vehicles) {
         if (!v.active) continue;
-        const trafficYaw = v.group.object3D.rotation.y;
-        const trafficCos = Math.abs(Math.cos(trafficYaw));
-        const trafficSin = Math.abs(Math.sin(trafficYaw));
-        const trafficHalfW = v.halfWidth * trafficCos + v.halfLength * trafficSin;
-        const trafficHalfL = v.halfWidth * trafficSin + v.halfLength * trafficCos;
-
-        if (Math.abs(v.worldZ - carWorldZ) > trafficHalfL + carHalfL) continue;
-        if (Math.abs(traffic.worldXOf(v) - carX) > trafficHalfW + carHalfW) continue;
-        return v;
+        _trafficRect.x = traffic.worldXOf(v);
+        _trafficRect.z = v.worldZ;
+        _trafficRect.halfWidth = v.halfWidth;
+        _trafficRect.halfLength = v.halfLength;
+        _trafficRect.yaw = v.group.object3D.rotation.y;
+        if (orientedBoxesOverlap(_carRect, _trafficRect)) return v;
     }
     return null;
 }
