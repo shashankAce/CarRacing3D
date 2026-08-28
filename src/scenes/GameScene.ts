@@ -290,7 +290,7 @@ export class GameScene extends Scene {
             this._refreshEnvironmentSky();
             this._environmentToggle.setCurrent(activeEnvironment());
             // The car's world Z is `travelled` — it always renders at z ≈ 0.
-            this._car.update(dt, this._input.axis, travelled, this._state.speed);
+            this._car.update(dt, this._input.axis, travelled, this._state.speed, this._state.speedT);
             this._traffic.update(dt, travelled, this._state.speedT, this._car.position.x);
 
             // Collision AFTER both have moved this frame, so neither is tested
@@ -441,6 +441,7 @@ export class GameScene extends Scene {
     private _selectCar(id: VehicleModelId): void {
         if (!this._vehiclesReady || !this._selectingCar) return;
 
+        this._state.setVehicleSpeedProfile(this._vehicleModels.spec(id).speed);
         this._car.setVisual(this._vehicleModels.create(id));
         this._car.refreshProjectedGeometry(this._projected);
         this._projected.rebake();

@@ -571,31 +571,6 @@ export const gameConfig = {
     },
 
     /**
-     * Speed ramp. Metres per second — multiply by 3.6 for the km/h readout.
-     * 22 m/s ≈ 79 km/h, 66 m/s ≈ 238 km/h.
-     */
-    /**
-     * Speed is now player-controlled: gas accelerates, while brake or releasing
-     * gas decelerates. The old automatic ramp is gone — the ramp was
-     * what made the run get harder on its own, and that job now belongs to the
-     * fuel timer plus the fact that bends can't be held at full speed.
-     */
-    speed: {
-        start: 30,
-        min: 20,
-        max: 66,
-        /** m/s² under gas. 7 takes 24 -> 66 in about six seconds. */
-        accelerate: 7,
-        /** m/s² under brake. Deliberately much stronger than the gas. */
-        brake: 14,
-        /**
-         * m/s² applied automatically whenever gas is released. Currently equal
-         * to manual braking; lower this for a gentler engine-braking effect.
-         */
-        autoBrake: 14,
-    },
-
-    /**
      * Fuel — the reason a run ends even when the player never crashes.
      *
      * Drains by TIME, not by distance. That is the whole point: with a constant
@@ -795,11 +770,13 @@ export const gameConfig = {
             metalness: 0.42,
         },
         models: [
-            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21 },
-            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60 },
-            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20 },
-            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23 },
-            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86 },
+            // Player-only performance. Values are metres/second and m/s²;
+            // traffic continues to use its independent `traffic.types` speeds.
+            { id: 'sport', label: 'SPORT', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 86, accelerate: 8.2, brake: 16, autoBrake: 14 } },
+            { id: 'sedan', label: 'SEDAN', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60, speed: { start: 28, min: 18, max: 66, accelerate: 6.6, brake: 14, autoBrake: 11 } },
+            { id: 'car', label: 'COUPE', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 75, accelerate: 7.2, brake: 14, autoBrake: 13 } },
+            { id: 'jeep', label: 'JEEP', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
+            { id: 'microbus', label: 'MICRO BUS', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
         ],
         materials: {
             pixelColors: { roughness: 0.22, metalness: 0.05 },

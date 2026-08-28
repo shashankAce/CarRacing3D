@@ -1,6 +1,18 @@
 import { gameConfig as cfg } from '../config/gameConfig';
 import { WorldScroll } from '../world/WorldScroll';
 
+type PlayerSpeedProfile = Readonly<{
+    start: number;
+    min: number;
+    max: number;
+    accelerate: number;
+    brake: number;
+    autoBrake: number;
+}>;
+
+const DEFAULT_SPEED_PROFILE = cfg.vehicles.models.find((model) => model.id === cfg.vehicles.playerDefault)?.speed
+    ?? cfg.vehicles.models[0].speed;
+
 /** What the run is currently doing. */
 export const enum RunPhase {
     RUNNING = 0,
@@ -18,8 +30,11 @@ export const enum RunPhase {
  */
 export class GameState {
 
+    /** Active player vehicle's complete speed profile. */
+    private _speedProfile: PlayerSpeedProfile = DEFAULT_SPEED_PROFILE;
+
     /** Current forward speed, m/s. */
-    speed = cfg.speed.start;
+    speed = this._speedProfile.start;
 
     /** Seconds of fuel remaining. */
     fuel = cfg.fuel.capacity;
@@ -30,8 +45,14 @@ export class GameState {
 
     /** 0 at the slowest the car can go, 1 at its top speed. */
     get speedT(): number {
-        const range = cfg.speed.max - cfg.speed.min;
-        return range <= 0 ? 1 : (this.speed - cfg.speed.min) / range;
+        const range = this._speedProfile.max - this._speedProfile.min;
+        return range <= 0 ? 1 : (this.speed - this._speedProfile.min) / range;
+    }
+
+    /** Applies the selected player's config-driven speed profile. */
+    setVehicleSpeedProfile(profile: PlayerSpeedProfile): void {
+        this._speedProfile = profile;
+        this.speed = Math.max(profile.min, Math.min(profile.max, this.speed));
     }
 
     /** 1 on a full tank, 0 empty. */
@@ -50,7 +71,7 @@ export class GameState {
      * @param throttle +1 gas/forward, -1 brake/reverse, 0 coast toward rest.
      */
     update(dt: number, throttle: number): void {
-        const s = cfg.speed;
+        const s = this._speedProfile;
         const rate = throttle > 0 ? s.accelerate
             : throttle < 0 ? -s.brake
             // Release always settles at zero. Applying a fixed negative rate
@@ -86,7 +107,8 @@ export class GameState {
     }
 
     reset(): void {
-        this.speed = cfg.speed.start;
+        const s = this._speedProfile;
+        this.speed = Math.max(s.min, Math.min(s.max, s.start));
         this.fuel = cfg.fuel.capacity;
         this.phase = RunPhase.RUNNING;
         this.scroll.reset();

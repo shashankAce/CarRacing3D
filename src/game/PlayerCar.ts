@@ -199,8 +199,9 @@ export class PlayerCar {
      * @param worldZ  The car's absolute world Z — i.e. `scroll.travelled`, since
      *                the car always renders at z ≈ 0.
      * @param speed   Forward road speed, m/s — drives the yaw path and wheels.
+     * @param speedT  Selected vehicle's normalized speed, from 0 to 1.
      */
-    update(dt: number, axis: number, worldZ: number, speed: number): void {
+    update(dt: number, axis: number, worldZ: number, speed: number, speedT: number): void {
         const steering = cfg.car.steering;
 
         // Input controls the visible rear-pivot rotation directly. It keeps the
@@ -269,7 +270,7 @@ export class PlayerCar {
         // Roll stacks on the ground tilt. Yaw follows steering input directly;
         // roll grows with both steering amount and speed.
         const turnT = steering.maxYawAngle === 0 ? 0 : -this._yaw / steering.maxYawAngle;
-        const speedFactor = THREE.MathUtils.clamp(speed / cfg.speed.max, 0, 1);
+        const speedFactor = THREE.MathUtils.clamp(speedT, 0, 1);
 
         // THREE rotates an object about its centre. Translate that centre along
         // the arc around a fixed rear pivot so the rear stays planted and the

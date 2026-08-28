@@ -37,6 +37,7 @@ interface WheelPlacement {
 
 const MATERIAL_ORDER: VehicleMaterialKey[] = ['PixelColors', 'Glass', 'Headlights', 'Wheel', 'Fallback'];
 const WHEEL_NAMES = new Set(['FR', 'FL', 'BR', 'BL']);
+const PALETTE_ASSET_ALIAS = 'vehicle:palette';
 
 /**
  * Loads the shared vehicle catalog once, then supplies normalized static clones.
@@ -57,11 +58,21 @@ export class VehicleModels {
         const cache = assetCache;
         if (!cache) throw new Error('Vehicle models were requested before AssetCache was initialized.');
 
-        const textureLoader = new THREE.TextureLoader();
-        const [palette, ...assets] = await Promise.all([
-            textureLoader.loadAsync(cfg.vehicles.paletteTexture),
-            ...cfg.vehicles.models.map((spec) => cache.loadModel(spec.asset, `vehicle:${spec.id}`)),
+        await cache.preloadAssets([
+            { src: cfg.vehicles.paletteTexture, type: 'image', alias: PALETTE_ASSET_ALIAS },
         ]);
+        const paletteImage = cache.getAsset(PALETTE_ASSET_ALIAS);
+        if (!(paletteImage instanceof HTMLImageElement)) {
+            throw new Error(`Vehicle palette "${cfg.vehicles.paletteTexture}" was not loaded as an image.`);
+        }
+
+        const assets = await Promise.all(
+            cfg.vehicles.models.map((spec) => cache.loadModel(spec.asset, `vehicle:${spec.id}`)),
+        );
+        // AssetCache owns every file-backed source. Three only wraps the
+        // already-cached image so the palette can be sampled by MeshStandardMaterial.
+        const palette = new THREE.Texture(paletteImage);
+        palette.needsUpdate = true;
         palette.colorSpace = THREE.SRGBColorSpace;
         palette.magFilter = THREE.NearestFilter;
         palette.minFilter = THREE.NearestMipmapNearestFilter;
