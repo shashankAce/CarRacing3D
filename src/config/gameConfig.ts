@@ -25,51 +25,13 @@ export const gameConfig = {
         height: 1280,
     },
 
-    /**
-     * Palette. The single highest-leverage block for a reskin: terrain colour
-     * is baked into a per-vertex attribute (see ARCHITECTURE.md §4.1), so a
-     * palette swap changes the whole biome with zero geometry change.
-     */
+    /** Shared colours; biome-specific terrain and sky palettes are in `environments`. */
     colors: {
         // NOTE: there is no `sky` or `fog` colour here on purpose. Both are
         // DERIVED from the sky dome's own horizon, which the shader warms toward
         // `sky.horizonSunsetColor` as the sun drops — so a hand-set fog colour
         // matches only at one sun angle and shows a seam at every other. See
         // `SkyDome.effectiveHorizonColor`.
-        /**
-         * Terrain palette. Grass blends vertically from `grassLow` on valley
-         * floors to `grassHigh` on crests; `dirt` and `rock` then blend in by
-         * slope and altitude (see `terrain.dirtSlope`/`rockSlope`).
-         *
-         * Two couplings to respect when tuning:
-         *
-         *  - **`dirt` and `rock` must differ in HUE, not just brightness.** They
-         *    saturate on the same steep faces, dirt first, so a rock that only
-         *    differs in saturation reads as "washed-out dirt" rather than stone.
-         *    Rock was cool blue-grey for exactly this reason before the
-         *    reference match warmed it, and dirt had to move redder and darker
-         *    to keep the separation. Change one, check the other.
-         *  - **These are pre-fog colours.** A palette that looks right up close
-         *    reads grey at mid-distance, so it has to start more vivid than it
-         *    should look. It was calibrated against a fog that removed 39% of
-         *    the colour by 100m; `world.fogFalloff` now removes ~15% there, so
-         *    it over-delivers. If the near field is garish, desaturate HERE
-         *    rather than thickening the fog, which is doing a different job.
-         *
-         * Olive rather than green, matched to reference/gameplay_ref.jpg: its
-         * grass samples rgb(169,166,77) lit and rgb(141,137,80) mid — red and
-         * green within 4 of each other, i.e. khaki. Ours was rgb(136,196,85),
-         * green 60 above red, and that one ratio is most of why it read as a
-         * different game.
-         */
-        terrain: {
-            // grassLow: 0x87834d,
-            grassLow: 0x6a874d,
-            grassHigh: 0xb7b562,
-            dirt: 0x7a4f2a,
-            // rock: 0xa09272,
-            rock: 0xd3ad89,
-        },
         road: 0x3c3c44,
         // road: 0x777778,
         roadLine: 0xe8e4cf,
@@ -79,11 +41,14 @@ export const gameConfig = {
         },
     },
 
-    /** Runtime-selectable world looks. Forest keeps the original palette. */
-    environments: {
+    /** Environment selection metadata; visual values live in the blocks below. */
+    environment: {
         default: 'forest',
+    },
+
+    /** Runtime-selectable colour palettes. Terrain shape lives in `terrain.presets`. */
+    environments: {
         forest: {
-            label: 'FOREST',
             terrain: {
                 low: 0x6a874d,
                 high: 0xb7b562,
@@ -99,7 +64,6 @@ export const gameConfig = {
             },
         },
         desert: {
-            label: 'DESERT',
             terrain: {
                 low: 0xb9783e,
                 high: 0xe2b86f,
@@ -224,21 +188,68 @@ export const gameConfig = {
         skirtDepth: 5,
         /** Hard cap on chunk rebuilds per frame — the anti-hitch dial. */
         maxBuildsPerFrame: 1,
-        /**
-         * PLACEHOLDER hills — a cheap 3-octave sine field. Phase 6 replaces
-         * `ambientHeightAt` with the ported fbm + ridged-mountain field from
-         * Procedural_3D_world, at which point `amplitude`/`baseFrequency` go
-         * away and the slope thresholds below need re-tuning against it.
-         *
-         * `baseFrequency` is the reciprocal of a wavelength: 0.045 is a ~140m
-         * lowest octave, with the two above it at ~58m and ~24m. Keep the
-         * lowest octave's wavelength WELL under the visible distance
-         * (chunkLength * chunksAhead) or the terrain reads as a flat tilt rather
-         * than as hills — at 0.016 the wavelength was 393m against ~150m of
-         * visible ground, and it looked like a plane.
-         */
-        amplitude: 5.5,
-        baseFrequency: 0.045,
+
+        /** Biome-specific terrain shape; streaming settings above stay shared. */
+        presets: {
+            forest: {
+                /** Existing forest values — intentionally preserved. */
+                amplitude: 5.5,
+                baseFrequency: 0.045,
+                mountains: {
+                    amplitude: 10,
+                    regionFrequency: 0.0035,
+                    threshold: 0.5,
+                    thresholdBand: 0.18,
+                    ridgeFrequency: 0.010,
+                    ridgeSquash: 1.65,
+                    sharpness: 2.2,
+                    distanceStart: 0,
+                    distanceFull: 30,
+                    baseSuppression: 0.65,
+                },
+                dirtSlopeStart: 0.20,
+                dirtSlopeFull: 0.42,
+                rockSlopeStart: 0.25,
+                rockSlopeFull: 0.45,
+                rockAltitudeStart: 12,
+                rockAltitudeFull: 30,
+            },
+            desert: {
+                /** Lower, wider undulations read as dunes instead of grassy hills. */
+                amplitude: 3.2,
+                baseFrequency: 0.024,
+                mountains: {
+                    /** Broad distant massifs, with no narrow alpine ridges. */
+                    amplitude: 11,
+                    regionFrequency: 0.0035,
+                    threshold: 0.48,
+                    thresholdBand: 0.28,
+                    ridgeFrequency: 0.006,
+                    ridgeSquash: 0.75,
+                    sharpness: 1.05,
+                    distanceStart: 15,
+                    distanceFull: 60,
+                    baseSuppression: 0.45,
+                },
+                /** Keep ordinary desert ground sandy until a genuinely steep face. */
+                dirtSlopeStart: 0.48,
+                dirtSlopeFull: 0.82,
+                rockSlopeStart: 0.95,
+                rockSlopeFull: 1.40,
+                rockAltitudeStart: 45,
+                rockAltitudeFull: 75,
+                /** Directional ripples left in the sand by prevailing wind. */
+                windPattern: {
+                    enabled: true,
+                    height: 0.24,
+                    colorStrength: 0.12,
+                    frequency: 0.72,
+                    warpFrequency: 0.045,
+                    warp: 1.15,
+                    direction: { x: 0.94, z: 0.34 },
+                },
+            },
+        },
 
         /**
          * TERRAIN THAT SHADOWS ITSELF — hills shading the ground behind them,
@@ -313,111 +324,6 @@ export const gameConfig = {
             minElevationDegrees: 6,
         },
 
-        /**
-         * Mountains — a selective, much larger height term on top of the hills.
-         *
-         * Structure ported from `Procedural_3D_world/src/terrain/ambientHeight.js`:
-         * a low-frequency REGION mask decides where a range exists at all, a
-         * DISTANCE mask keeps ranges off the roadside, and the shape is a ridged
-         * field sampled on a rotated, anisotropically squashed domain so peaks
-         * read as elongated chains instead of a field of isotropic bumps. The
-         * height is a broad massif hump plus sharp ridge detail on top — without
-         * the hump, ridge noise alone fades to bumps at the mask edges instead of
-         * a mountain with a base.
-         *
-         * The steep faces this produces are what trip the rock colour band, which
-         * gentle hills never reach — so this is also what makes rock read as rock.
-         */
-        mountains: {
-            /** Peak height above the hills, metres. */
-            amplitude: 10,
-            /** Region mask: low frequency, thresholded. Wavelength ~1800m. */
-            regionFrequency: 0.0035,
-            threshold: 0.5,
-            /** Half-width of the smoothstep either side of `threshold`. */
-            thresholdBand: 0.18,
-            /** Ridge detail frequency. Wavelength ~630m. */
-            ridgeFrequency: 0.010,
-            /** How much a range is squashed across its own strike direction. */
-            ridgeSquash: 1.65,
-            /** Exponent on the ridge — higher is sharper peaks, deeper gullies. */
-            sharpness: 2.2,
-            /**
-             * Mountains start rising this far from the road centre and reach full
-             * height by the second value. Must comfortably exceed the flattened
-             * corridor plus shoulder (~18m) or a range becomes a wall at the
-             * verge; but the view frustum is only ±21°, so pushing them too far
-             * out means they're only ever seen deep in the fog.
-             */
-            distanceStart: 0,
-            distanceFull: 30,
-            /**
-             * How much the small hill octaves are damped inside a mountain
-             * region, so their bumps don't fight the ridge's own shape.
-             */
-            baseSuppression: 0.65,
-        },
-
-        /**
-         * Where grass gives way to dirt and then to bare rock, in units of
-         * terrain SLOPE (rise over run) rather than normal components — 0 is
-         * dead flat, 1 is a 45° face. Converted to normal thresholds once at
-         * module load.
-         *
-         * These have to be set against the slopes the height field actually
-         * produces: the first pass used thresholds borrowed from P3W's
-         * mountainous valley, which this gentle roadside terrain never reached,
-         * so dirt and rock were unreachable and everything was uniformly green.
-         */
-        /*
-         * Set against the measured slope distribution of the field above
-         * (median 0.24, p90 0.45, max 0.78): grass dominates ~63% of the
-         * ground, dirt is a real but secondary presence, and rock is a rare
-         * accent on the steepest faces only. Lowering these browns the whole
-         * world out fast — at 0.14/0.34 dirt covered 80% of the ground.
-         */
-        dirtSlopeStart: 0.20,
-        dirtSlopeFull: 0.42,
-        /*
-         * Rock has been tuned down twice, because it kept landing where nobody
-         * looks. Measured on the real vertex grid:
-         *
-         *  - 0.42-0.66: 4% mean blend. Invisible.
-         *  - 0.32-0.56: 51% mean blend in a 5m strip on the SHOULDER (the steep
-         *    drop from road corridor to terrain) but only 11% on the hills —
-         *    so what rock existed hugged the road edge, two vertices wide, and
-         *    read as edge shading rather than as stone.
-         *  - 0.24-0.42: 27% on the hills. Confirmed present via
-         *    `debug.showSlopeBands` — large solid bands on both sides.
-         *  - 0.28-0.48 (here): 18% on the hills, and still saturating on the
-         *    shoulder. A compromise, because a debug screenshot showed BOTH
-         *    zones are visible from the chase camera, so covering only one was
-         *    the wrong trade in either direction.
-         *
-         * The reason rock looked absent was never coverage — it was `world.fogDensity`
-         * washing mid-distance terrain to sky colour. See that setting.
-         *
-         * Nudged down again when chunk normals moved from analytic central
-         * differences (0.4m) to differencing the sampled grid (2.5m) for a 6.3x
-         * build speedup. Averaging slope over the vertex spacing lowers it
-         * slightly, which cost ~4 points of coverage; 0.20-0.42 and 0.25-0.45
-         * restore it to within half a point (dirt 27.5% vs 28.0%, rock 20.4%
-         * vs 19.8%).
-         *
-         * Note this is tuned to PLACEHOLDER hills, whose slopes are gentle.
-         * Phase 6's ported ridged-mountain field has genuinely steep faces and
-         * will need these raised again, or the world turns grey.
-         */
-        rockSlopeStart: 0.25,
-        rockSlopeFull: 0.45,
-        /**
-         * Rock also takes over by ALTITUDE, regardless of slope. Slope alone is
-         * enough for hills, but a mountain has broad gentle flanks high up that
-         * would otherwise be bright grass — a green mountain reads wrong, and the
-         * point of raising the terrain was to get rock.
-         */
-        rockAltitudeStart: 12,
-        rockAltitudeFull: 30,
     },
 
     /**
@@ -721,6 +627,7 @@ export const gameConfig = {
 
     /** Small in-game button used to swap the active environment. */
     environmentToggle: {
+        labels: { forest: 'FOREST', desert: 'DESERT' },
         width: 180,
         height: 64,
         edgeMargin: 22,
@@ -1471,7 +1378,10 @@ export const gameConfig = {
 
     /** Sparse low-poly scenery used by the desert biome. */
     desertProps: {
+        /** Full generated catalog; rocks remain available for future biomes. */
         variants: 4,
+        /** Only the first two cactus variants are placed in the desert scene. */
+        activeVariants: 2,
         spacing: 24,
         roadClearance: 11,
         maxSlope: 0.62,

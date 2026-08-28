@@ -2,7 +2,7 @@ import { gameConfig as cfg } from './gameConfig';
 
 export type EnvironmentId = 'forest' | 'desert';
 
-let active: EnvironmentId = cfg.environments.default as EnvironmentId;
+let active: EnvironmentId = cfg.environment.default as EnvironmentId;
 
 export function activeEnvironment(): EnvironmentId {
     return active;
@@ -10,10 +10,6 @@ export function activeEnvironment(): EnvironmentId {
 
 export function setActiveEnvironment(id: EnvironmentId): void {
     active = id;
-}
-
-export function environmentPreset(id: EnvironmentId = active) {
-    return cfg.environments[id];
 }
 
 /** Forest follows the time-of-day resolver; desert supplies its warmer authored sky. */
@@ -28,6 +24,11 @@ export function environmentSkyPreset(id: EnvironmentId = active) {
         };
     }
     return cfg.environments.desert.sky;
+}
+
+/** Resolves the complete shape preset for the active biome. */
+export function environmentTerrainPreset(id: EnvironmentId = active) {
+    return cfg.terrain.presets[id];
 }
 
 export function toggleEnvironment(): EnvironmentId {

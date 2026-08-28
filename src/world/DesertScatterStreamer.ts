@@ -45,7 +45,7 @@ export class DesertScatterStreamer {
     constructor(scene: Scene, scroll: WorldScroll) {
         this._scroll = scroll;
         const material = createDesertPropMaterial();
-        for (let i = 0; i < cfg.desertProps.variants; i++) {
+        for (let i = 0; i < cfg.desertProps.activeVariants; i++) {
             const variant = createDesertProp(0xd35e7 + i * 811, i);
             const node = new Node();
             const mesh = node.addComponent(InstancedMesh3D);
@@ -93,7 +93,7 @@ export class DesertScatterStreamer {
             for (let gx = 0; gx < sizeX; gx += c.spacing) {
                 const x = cx * sizeX + gx + c.spacing * (0.5 + (rand() - 0.5) * 0.8);
                 const z = cz * sizeZ + gz + c.spacing * (0.5 + (rand() - 0.5) * 0.8);
-                const variant = Math.floor(rand() * c.variants);
+                const variant = Math.floor(rand() * c.activeVariants);
                 if (Math.abs(x - roadCenterX(z)) < c.roadClearance) continue;
                 if (DesertScatterStreamer._density(x, z) < c.densityCutoff) continue;
                 normalAt(x, z, _normal);

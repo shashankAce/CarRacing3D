@@ -1,6 +1,8 @@
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadLevelAt } from '../world/roadPath';
 import { smoothstep, lerp } from './math';
+import { activeEnvironment, environmentTerrainPreset } from '../config/environment';
+import { sandWindPatternAt } from './sandWind';
 
 /**
  * heightField — the terrain surface, as a pure function of absolute world (x, z).
@@ -80,7 +82,7 @@ function ridge(u: number, v: number): number {
  * recomputed — it's already hoisted out of the chunk builder's inner loop.
  */
 function mountainMask(x: number, z: number, centreX: number): number {
-    const m = cfg.terrain.mountains;
+    const m = environmentTerrainPreset().mountains;
     const rf = m.regionFrequency;
     const region = octave(x * rf, z * rf) / 1.4 * 0.5 + 0.5;
     const regionMask = smoothstep(m.threshold - m.thresholdBand, m.threshold + m.thresholdBand, region);
@@ -99,9 +101,10 @@ function mountainMask(x: number, z: number, centreX: number): number {
  * as a tinted plane.
  */
 export function ambientHeightAt(x: number, z: number, centreX: number): number {
-    const f = cfg.terrain.baseFrequency;
-    const a = cfg.terrain.amplitude;
-    const m = cfg.terrain.mountains;
+    const preset = environmentTerrainPreset();
+    const f = preset.baseFrequency;
+    const a = preset.amplitude;
+    const m = preset.mountains;
 
     const mask = mountainMask(x, z, centreX);
 
@@ -113,18 +116,25 @@ export function ambientHeightAt(x: number, z: number, centreX: number): number {
         0.15 * octave(x * f * 5.8 + 23.7, z * f * 5.8 + 17.9)
     ) * (1 - mask * m.baseSuppression);
 
-    if (mask <= 0) return hills;
+    let terrain = hills;
 
-    // Rotated 45° and squashed across the strike direction, so ranges elongate
-    // into chains rather than appearing as round lumps.
-    const rf = m.ridgeFrequency;
-    const rx = (x + z) * 0.7071 * rf;
-    const rz = (z - x) * 0.7071 * m.ridgeSquash * rf;
-    const r = Math.pow(ridge(rx + 40, rz + 40), m.sharpness);
+    if (mask > 0) {
+        // Rotated 45° and squashed across the strike direction, so ranges elongate
+        // into chains rather than appearing as round lumps.
+        const rf = m.ridgeFrequency;
+        const rx = (x + z) * 0.7071 * rf;
+        const rz = (z - x) * 0.7071 * m.ridgeSquash * rf;
+        const r = Math.pow(ridge(rx + 40, rz + 40), m.sharpness);
 
-    // Sharp ridge detail plus a broad massif hump, so a range has bulk and
-    // doesn't fade to a field of bumps where the mask tails off.
-    return hills + mask * (r * m.amplitude + mask * m.amplitude * 0.35);
+        // Sharp ridge detail plus a broad massif hump, so a range has bulk and
+        // doesn't fade to a field of bumps where the mask tails off.
+        terrain += mask * (r * m.amplitude + mask * m.amplitude * 0.35);
+    }
+
+    if (activeEnvironment() === 'desert') {
+        terrain += sandWindPatternAt(x, z) * cfg.terrain.presets.desert.windPattern.height;
+    }
+    return terrain;
 }
 
 /**

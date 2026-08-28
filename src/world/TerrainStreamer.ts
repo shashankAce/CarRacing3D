@@ -115,9 +115,12 @@ export class TerrainStreamer {
         // Must cover the tallest thing a chunk can contain. Mountains reach
         // `amplitude * 1.35` above the hills (ridge plus massif hump), and an
         // undersized sphere makes whole chunks vanish at the edge of frame.
+        const forestHeight = t.presets.forest.amplitude * 2
+            + t.presets.forest.mountains.amplitude * 1.4;
+        const desertHeight = t.presets.desert.amplitude * 2
+            + t.presets.desert.mountains.amplitude * 1.4;
         const radius = Math.hypot(sizeX, sizeZ) * 0.5 + t.skirtDepth
-            + t.amplitude * 2 + Math.abs(cfg.road.slopeAmplitude)
-            + t.mountains.amplitude * 1.4;
+            + Math.max(forestHeight, desertHeight) + Math.abs(cfg.road.slopeAmplitude);
         const boundingSphere = new THREE.Sphere(new THREE.Vector3(sizeX / 2, 0, -sizeZ / 2), radius);
 
         for (let i = 0; i < slotCount; i++) {
@@ -307,7 +310,7 @@ export class TerrainStreamer {
         this._recordStats = true;
     }
 
-    /** Re-bakes vertex colours for every resident chunk after a biome change. */
+    /** Re-bakes geometry, normals and colours for every resident chunk after a biome change. */
     refreshAllNow(): void {
         this._recordStats = false;
         const started = performance.now();

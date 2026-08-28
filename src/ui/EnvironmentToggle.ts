@@ -1,6 +1,6 @@
 import { Input, Label, Node, Scene, Widget, inputListener } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
-import { environmentPreset, type EnvironmentId } from '../config/environment';
+import type { EnvironmentId } from '../config/environment';
 
 /** Compact always-available button for swapping forest and desert. */
 export class EnvironmentToggle {
@@ -36,6 +36,6 @@ export class EnvironmentToggle {
 
     private _refresh(): void {
         this._label.color = cfg.environmentToggle.color;
-        this._label.text = `${cfg.environmentToggle.prefix}: ${environmentPreset(this._current).label}`;
+        this._label.text = `${cfg.environmentToggle.prefix}: ${cfg.environmentToggle.labels[this._current]}`;
     }
 }

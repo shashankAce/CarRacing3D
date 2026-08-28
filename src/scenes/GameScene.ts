@@ -349,7 +349,7 @@ export class GameScene extends Scene {
         this._scatter.setVisible(id === 'forest');
         this._desertScatter.setVisible(id === 'desert');
 
-        // Terrain colour is baked per vertex, so repaint the resident pool now.
+        // Terrain colour and sand ripples are baked per vertex, so rebuild the resident pool now.
         this._terrain.refreshAllNow();
         if (id === 'forest') this._scatter.reset();
         else this._desertScatter.reset();

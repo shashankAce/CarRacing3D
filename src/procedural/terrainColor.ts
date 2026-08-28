@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../config/gameConfig';
-import { activeEnvironment } from '../config/environment';
+import { activeEnvironment, environmentTerrainPreset } from '../config/environment';
 import { smoothstep } from './math';
+import { sandWindPatternAt } from './sandWind';
 
 /**
  * terrainColor — per-vertex terrain colour, baked into the mesh's `color`
@@ -20,7 +21,7 @@ import { smoothstep } from './math';
  */
 
 /**
- * Palette constants, unpacked once at module load from `colors.terrain`.
+ * Palette constants, unpacked once at module load from `environments`.
  *
  * The values live on the config surface rather than here because the ground
  * colour is the most obviously reskinnable thing in the game; the tuning
@@ -69,27 +70,40 @@ function slopeToNormalY(slope: number): number {
     return 1 / Math.sqrt(1 + slope * slope);
 }
 
-const DIRT_START_NY = slopeToNormalY(cfg.terrain.dirtSlopeStart);
-const DIRT_FULL_NY = slopeToNormalY(cfg.terrain.dirtSlopeFull);
-const ROCK_START_NY = slopeToNormalY(cfg.terrain.rockSlopeStart);
-const ROCK_FULL_NY = slopeToNormalY(cfg.terrain.rockSlopeFull);
+const SLOPE_THRESHOLDS = {
+    forest: {
+        dirtStart: slopeToNormalY(cfg.terrain.presets.forest.dirtSlopeStart),
+        dirtFull: slopeToNormalY(cfg.terrain.presets.forest.dirtSlopeFull),
+        rockStart: slopeToNormalY(cfg.terrain.presets.forest.rockSlopeStart),
+        rockFull: slopeToNormalY(cfg.terrain.presets.forest.rockSlopeFull),
+    },
+    desert: {
+        dirtStart: slopeToNormalY(cfg.terrain.presets.desert.dirtSlopeStart),
+        dirtFull: slopeToNormalY(cfg.terrain.presets.desert.dirtSlopeFull),
+        rockStart: slopeToNormalY(cfg.terrain.presets.desert.rockSlopeStart),
+        rockFull: slopeToNormalY(cfg.terrain.presets.desert.rockSlopeFull),
+    },
+};
 
 export function terrainColorAt(
-    _x: number,
+    x: number,
     y: number,
-    _z: number,
+    z: number,
     normalY: number,
     out: { r: number; g: number; b: number },
 ): void {
-    const palette = PALETTES[activeEnvironment()];
-    const dirtT = smoothstep(DIRT_START_NY, DIRT_FULL_NY, normalY);
+    const environment = activeEnvironment();
+    const palette = PALETTES[environment];
+    const slopes = SLOPE_THRESHOLDS[environment];
+    const preset = environmentTerrainPreset(environment);
+    const dirtT = smoothstep(slopes.dirtStart, slopes.dirtFull, normalY);
     // Rock from steepness OR from altitude, whichever is stronger. Slope alone
     // is enough for hills, but a mountain has broad gentle flanks high up that
     // would otherwise stay bright grass — and a green mountain reads wrong when
     // the whole point of raising the terrain was to get rock.
     const rockT = Math.max(
-        smoothstep(ROCK_START_NY, ROCK_FULL_NY, normalY),
-        smoothstep(cfg.terrain.rockAltitudeStart, cfg.terrain.rockAltitudeFull, y),
+        smoothstep(slopes.rockStart, slopes.rockFull, normalY),
+        smoothstep(preset.rockAltitudeStart, preset.rockAltitudeFull, y),
     );
 
     if (cfg.debug.showSlopeBands) {
@@ -99,7 +113,7 @@ export function terrainColorAt(
     }
 
     // Height ramp: darker green in the hollows, lighter on the rises.
-    const amp = cfg.terrain.amplitude;
+    const amp = preset.amplitude;
     const heightT = smoothstep(-amp, amp, y);
     let r = palette.low.r + (palette.high.r - palette.low.r) * heightT;
     let g = palette.low.g + (palette.high.g - palette.low.g) * heightT;
@@ -113,4 +127,15 @@ export function terrainColorAt(
     out.r = r + (palette.rock.r - r) * rockT;
     out.g = g + (palette.rock.g - g) * rockT;
     out.b = b + (palette.rock.b - b) * rockT;
+
+    if (environment === 'desert') {
+        // Wind markings belong on sand, not on steep exposed faces. This also
+        // keeps mountain silhouettes clean when their slope config is retuned.
+        const flatT = smoothstep(0.86, 0.985, normalY) * (1 - rockT);
+        const contrast = 1 + sandWindPatternAt(x, z)
+            * cfg.terrain.presets.desert.windPattern.colorStrength * flatT;
+        out.r *= contrast;
+        out.g *= contrast;
+        out.b *= contrast;
+    }
 }
