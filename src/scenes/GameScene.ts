@@ -20,6 +20,7 @@ import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
 import { EnvironmentToggle } from '../ui/EnvironmentToggle';
+import { FullscreenButton } from '../ui/FullscreenButton';
 import { CollisionDebugDraw } from '../ui/CollisionDebugDraw';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
@@ -72,6 +73,7 @@ export class GameScene extends Scene {
     private _gameOver: GameOverPanel;
     private _carSelect: CarSelectPanel;
     private _environmentToggle: EnvironmentToggle;
+    private _fullscreenButton: FullscreenButton;
     private _collisionDebug: CollisionDebugDraw | null = null;
     private _vehicleModels: VehicleModels;
     private _vehiclesReady = false;
@@ -200,7 +202,8 @@ export class GameScene extends Scene {
         this._vehicleModels = new VehicleModels();
         this._carSelect = new CarSelectPanel(this, (id) => this._selectCar(id));
         this._environmentToggle = new EnvironmentToggle(this, activeEnvironment(), () => this._switchEnvironment());
-        this._controls.ignoreTarget(this._environmentToggle.node);
+        this._fullscreenButton = new FullscreenButton(this);
+        this._input.ignoreTapTarget(this._fullscreenButton.node);
         if (cfg.debug.showPerf) {
             this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
             // Debug bisection hook for the tree mask; see `debugStats`.
@@ -486,6 +489,7 @@ export class GameScene extends Scene {
 
     onUnload(): void {
         this._input?.detach();
+        this._fullscreenButton?.detach();
         this._collisionDebug?.dispose();
     }
 }

@@ -451,10 +451,11 @@ different on a 120Hz phone than in the dev browser. Look-at target leads the car
 slightly so the player sees oncoming traffic sooner as speed rises.
 
 ### 5.7 Controls
-Hold-to-steer, both input paths always live:
+Both input paths are always live:
 - Keyboard: poll `inputListener.isKeyDown('ArrowLeft'/'ArrowRight')`.
-- Touch: two `Input.POINTER_DOWN`/`POINTER_UP` regions (or screen halves) — plus
-  a drag-to-steer path, which tests better on mobile playables.
+- Touch: one bottom-centre circular virtual joystick. Horizontal displacement is
+  steering, vertical displacement is gas/brake, and diagonal displacement
+  combines both. Releasing it returns throttle to zero for automatic braking.
 
 The player axis drives a damped steering yaw, not a free lateral velocity.
 The current car reaches `0.22` radians at full input, with a rear pivot at
@@ -815,9 +816,9 @@ Pooled traffic boxes, lane spawn logic scaled by speed, hand-rolled collision,
 crash → game over → restart, near-miss scoring.
 
 **Phase 5 — player throttle and fuel.**
-Gas and brake replace the automatic speed ramp; four on-screen buttons (steer
-left/right, gas, brake) plus keyboard; a fuel tank that drains on time and ends
-the run when empty. Added at the owner's request after playing Phase 4, and it
+Gas and brake replace the automatic speed ramp; one combined virtual joystick
+plus keyboard; a fuel tank that drains on time and ends the run when empty.
+Added at the owner's request after playing Phase 4, and it
 changes the shape of the game: the ramp used to supply the difficulty curve, and
 that job now belongs to the fuel clock plus the fact that the sharpest bends
 cannot be held at full speed. `road.curveAmplitude` goes to 8 for the same

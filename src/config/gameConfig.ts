@@ -585,33 +585,24 @@ export const gameConfig = {
         warnAt: 0.25,
     },
 
-    /**
-     * On-screen controls: steering at the bottom left, throttle at the bottom
-     * right, thumbs in the corners.
-     *
-     * X positions are derived at build time from the LIVE design width, not from
-     * these numbers — under FIXED_HEIGHT the design width varies with aspect
-     * ratio (a 19.5:9 phone gives ~591 units against the nominal 720). A first
-     * pass placed them at fixed offsets from the centre, which put the left
-     * button at x = -5 on a narrow screen, i.e. off the display entirely.
-     *
-     * A node's position is the hit box's CORNER, not its centre
-     * (`InputListener._hitAABB` tests `0 <= local <= width/height`), and y is
-     * measured UP from the bottom.
-     */
+    /** One bottom-centre virtual joystick for steering, gas, and brake. */
     controls: {
-        size: 150,
-        /** Glyph size inside a button. */
-        glyphSize: 62,
-        color: '#f2f6f8',
-        pressedColor: '#ffd24a',
-        /** Gap from the screen edge, and between the two steering buttons. */
-        edgeMargin: 26,
-        buttonGap: 12,
-        /** Heights of the bottom-left corners (y runs UP from the bottom). */
-        steerY: 140,
-        gasY: 250,
-        brakeY: 80,
+        /** Vertical centre in the Y-up design space; X follows the live screen centre. */
+        centerY: 175,
+        /** Visible gate, thumb knob, movement limit, and forgiving hit radius. */
+        baseRadius: 104,
+        knobRadius: 43,
+        travelRadius: 62,
+        touchRadius: 135,
+        /** Per-axis travel ignored, preventing thumb drift on the other axis. */
+        deadZone: 0.22,
+        strokeWidth: 5,
+        baseColor: '#17232a66',
+        baseStrokeColor: '#f2f6f899',
+        knobColor: '#f2f6f8cc',
+        knobStrokeColor: '#ffffffdd',
+        pressedColor: '#ffd24add',
+        knobPressedColor: '#ffd24aee',
     },
 
     /** Small in-game button used to swap the active environment. */
@@ -625,6 +616,22 @@ export const gameConfig = {
         color: '#fff3d2',
         pressedColor: '#ffd05a',
         prefix: 'BIOME',
+    },
+
+    /** Browser fullscreen toggle; fullscreen itself must begin from a user tap. */
+    fullscreenButton: {
+        size: 72,
+        backgroundRadius: 32,
+        edgeMargin: 22,
+        fontSize: 34,
+        strokeWidth: 3,
+        enterGlyph: '⛶',
+        exitGlyph: '✕',
+        color: '#f2f6f8',
+        pressedColor: '#ffd24a',
+        backgroundColor: '#17232a99',
+        pressedBackgroundColor: '#5b4b18cc',
+        strokeColor: '#f2f6f8aa',
     },
 
 
@@ -1003,7 +1010,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 17,
+            hour: 4,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
@@ -1767,7 +1774,7 @@ export const gameConfig = {
      * mobile — see ARCHITECTURE.md §2.4.
      */
     render: {
-        pixelRatioCap: 2.5,
+        pixelRatioCap: 2,
         resolutionScale: 2,
     },
 };

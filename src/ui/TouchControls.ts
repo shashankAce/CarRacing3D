@@ -1,182 +1,132 @@
-import { Node, Label, Scene, Input } from 'noonengine';
-import { inputListener } from 'noonengine';
+import { Graphics, Input, Node, Scene, inputListener } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
-/** The four on-screen controls, in a fixed order. */
-export const enum Control {
-    STEER_LEFT = 0,
-    STEER_RIGHT = 1,
-    GAS = 2,
-    BRAKE = 3,
-}
-
-interface Button {
-    control: Control;
-    hit: Node;
-    glyph: Label;
-    /** Pointer ids currently holding this button — multi-touch aware. */
-    held: Set<number>;
-}
-
 /**
- * TouchControls — four hold-to-act buttons plus full-screen steering zones.
- * A touch outside gas/brake steers left or right according to the screen half
- * it is currently in. The visible steering buttons remain as affordances, but
- * the player does not have to hit their small boxes while looking at traffic.
+ * TouchControls — one PUBG-style virtual joystick for every mobile driving input.
  *
- * Structure per button: a bare parent node carrying the hit box, with the glyph
- * on a CHILD. The parent has no render component on purpose — `LabelSystem`
- * writes a label's measured text size back into its node
- * (`LabelSystem.js:512`), so putting the glyph on the hit node would shrink the
- * touch target to the size of one character.
+ * Dragging up/down produces gas/brake, dragging left/right steers, and diagonal
+ * drags combine both axes. The knob is clamped to the circular gate while the
+ * exposed values use a dead zone on each axis, so a mostly-horizontal drag
+ * does not accidentally brake and a mostly-vertical drag does not steer.
+ * Releasing the pointer returns both values to
+ * zero; GameState already interprets zero throttle as automatic braking.
  *
- * A node's position is the hit box's CORNER and y runs upward
- * (`InputListener._hitAABB` tests `0 <= local <= width/height`), so the
- * configured positions are bottom-left corners.
- *
- * Release is handled by a GLOBAL pointer-up listener keyed on pointer id, not by
- * a per-node up listener. Two reasons, both of which produce stuck buttons
- * otherwise: a finger that slides off a button never delivers an up event to
- * that node, and a global "release everything" handler would drop the steering
- * button the moment the player lifted their gas thumb.
+ * The large bare parent is the hit target. The rendered base and knob are
+ * children so Graphics' measured bounds never shrink the usable touch area.
+ * One pointer owns the joystick until it is released or cancelled.
  */
 export class TouchControls {
 
-    private _buttons: Button[] = [];
-    /** Which button each live pointer is holding. */
-    private _byPointer = new Map<number, Button>();
-    /** Touch pointers that began in a full-screen steering zone. */
-    private _zonePointers = new Set<number>();
-    private _screenWidth: number;
+    /** -1 full left … +1 full right. */
+    axis = 0;
+
+    /** +1 gas, -1 brake, 0 released/automatic brake. */
+    throttle = 0;
+
+    private _hit: Node;
+    private _knobNode: Node;
+    private _base: Graphics;
+    private _knob: Graphics;
+    private _pointerId: number | null = null;
     private _enabled = false;
-    /** UI elements that must not also start full-screen steering. */
-    private _ignoredTargets = new Set<Node>();
 
     constructor(scene: Scene) {
         const c = cfg.controls;
+        const screenWidth = inputListener.engine?.display?.designWidth ?? cfg.design.width;
 
-        // Anchor to the LIVE design width. Under FIXED_HEIGHT it varies with the
-        // device's aspect ratio, so anything derived from `cfg.design.width`
-        // drifts — and centre-relative offsets pushed the left button off-screen
-        // entirely on a narrow phone.
-        const width = inputListener.engine?.display?.designWidth ?? cfg.design.width;
-        this._screenWidth = width;
-        const left = c.edgeMargin;
-        const right = width - c.edgeMargin - c.size;
+        // The hit target is intentionally larger than the visible gate so a
+        // moving thumb can acquire the control without pixel-perfect aiming.
+        this._hit = new Node(screenWidth * 0.8, c.centerY);
+        this._hit.width = c.touchRadius * 2;
+        this._hit.height = c.touchRadius * 2;
+        this._hit.name = 'VirtualJoystickHit';
+        scene.addChild(this._hit);
 
-        const layout: Array<[Control, number, number, string]> = [
-            [Control.STEER_LEFT, left, c.steerY, '◀'],
-            [Control.STEER_RIGHT, left + c.size + c.buttonGap, c.steerY, '▶'],
-            [Control.GAS, right, c.gasY, '▲'],
-            [Control.BRAKE, right, c.brakeY, '▼'],
-        ];
+        const baseNode = new Node();
+        baseNode.name = 'VirtualJoystickBase';
+        this._base = baseNode.addComponent(Graphics);
+        this._base.tessellate = true;
+        this._base.setStroke(c.baseStrokeColor, c.strokeWidth);
+        this._base.drawCircle(c.baseRadius, c.baseColor);
+        this._hit.addChild(baseNode);
 
-        for (const [control, x, y, glyphText] of layout) {
-            const hit = new Node(x, y);
-            hit.width = c.size;
-            hit.height = c.size;
-            scene.addChild(hit);
+        this._knobNode = new Node();
+        this._knobNode.name = 'VirtualJoystickKnob';
+        this._knob = this._knobNode.addComponent(Graphics);
+        this._knob.tessellate = true;
+        this._knob.setStroke(c.knobStrokeColor, c.strokeWidth);
+        this._knob.drawCircle(c.knobRadius, c.knobColor);
+        this._hit.addChild(this._knobNode);
 
-            // Child, centred in the parent's box.
-            const glyphNode = new Node(c.size / 2, c.size / 2);
-            const glyph = glyphNode.addComponent(Label);
-            glyph.fontSize = c.glyphSize;
-            glyph.color = c.color;
-            glyph.text = glyphText;
-            hit.addChild(glyphNode);
-
-            const button: Button = { control, hit, glyph, held: new Set() };
-            // Registering a spatial listener is what makes the node hit-testable
-            // at all — it auto-adds an Interactive component.
-            hit.on(Input.POINTER_DOWN, (e: any) => this._press(button, e.pointer.id), this);
-            this._buttons.push(button);
-        }
-
-        inputListener.on(Input.POINTER_DOWN, this._zoneDown, null, this);
-        inputListener.on(Input.POINTER_MOVE, this._zoneMove, null, this);
-        inputListener.on(Input.POINTER_UP, this._release, null, this);
-        inputListener.on(Input.POINTER_CANCEL, this._release, null, this);
+        this._hit.on(Input.POINTER_DOWN, this._onDown, this);
+        inputListener.on(Input.POINTER_MOVE, this._onMove, null, this);
+        inputListener.on(Input.POINTER_UP, this._onRelease, null, this);
+        inputListener.on(Input.POINTER_CANCEL, this._onRelease, null, this);
     }
 
     detach(): void {
-        inputListener.off(Input.POINTER_DOWN, this._zoneDown, null);
-        inputListener.off(Input.POINTER_MOVE, this._zoneMove, null);
-        inputListener.off(Input.POINTER_UP, this._release, null);
-        inputListener.off(Input.POINTER_CANCEL, this._release, null);
+        this._hit.off(Input.POINTER_DOWN, this._onDown, this);
+        inputListener.off(Input.POINTER_MOVE, this._onMove, null);
+        inputListener.off(Input.POINTER_UP, this._onRelease, null);
+        inputListener.off(Input.POINTER_CANCEL, this._onRelease, null);
     }
 
-    isHeld(control: Control): boolean {
-        return this._buttons[control].held.size > 0;
-    }
-
-    ignoreTarget(node: Node): void {
-        this._ignoredTargets.add(node);
-    }
-
-    /** Enables or hides the complete touch-control layer, e.g. for menus. */
+    /** Enables or hides the joystick, e.g. while the car-selection menu owns UI. */
     setEnabled(enabled: boolean): void {
         this._enabled = enabled;
-        for (const button of this._buttons) button.hit.active = enabled;
+        this._hit.active = enabled;
         if (!enabled) this.clear();
     }
 
-    /** Drops every hold — used on restart so a finger still down doesn't act. */
+    /** Drops the active gesture and returns the knob and both axes to rest. */
     clear(): void {
-        for (const b of this._buttons) {
-            b.held.clear();
-            b.glyph.color = cfg.controls.color;
-        }
-        this._byPointer.clear();
-        this._zonePointers.clear();
+        this._pointerId = null;
+        this.axis = 0;
+        this.throttle = 0;
+        this._knobNode.x = 0;
+        this._knobNode.y = 0;
+        this._base.strokeColor = cfg.controls.baseStrokeColor;
+        this._knob.fillColor = cfg.controls.knobColor;
     }
 
-    /** Starts steering from either screen half, except over gas/brake. */
-    private _zoneDown(e: any): void {
-        if (!this._enabled || e.pointer.pointerType !== 'touch') return;
-        if (this._ignoredTargets.has(e.target)) return;
-        if (e.target === this._buttons[Control.GAS].hit
-            || e.target === this._buttons[Control.BRAKE].hit) return;
-
-        const pointerId = e.pointer.id;
-        this._zonePointers.add(pointerId);
-        this._steerFromX(pointerId, e.x);
+    private _onDown(e: any): void {
+        if (!this._enabled || this._pointerId !== null) return;
+        this._pointerId = e.pointer.id;
+        this._base.strokeColor = cfg.controls.pressedColor;
+        this._knob.fillColor = cfg.controls.knobPressedColor;
+        this._update(e.x, e.y);
     }
 
-    /** Crossing the centre line while held changes steering direction. */
-    private _zoneMove(e: any): void {
-        const pointerId = e.pointer.id;
-        if (!this._zonePointers.has(pointerId)) return;
-        this._steerFromX(pointerId, e.x);
+    private _onMove(e: any): void {
+        if (e.pointer.id !== this._pointerId) return;
+        this._update(e.x, e.y);
     }
 
-    private _steerFromX(pointerId: number, x: number): void {
-        const control = x < this._screenWidth * 0.5
-            ? Control.STEER_LEFT
-            : Control.STEER_RIGHT;
-        this._press(this._buttons[control], pointerId);
+    private _onRelease(e: any): void {
+        if (e.pointer.id !== this._pointerId) return;
+        this.clear();
     }
 
-    private _press(button: Button, pointerId: number): void {
-        // One pointer holds one button. If it somehow moved between boxes, the
-        // old one must let go or it sticks.
-        const previous = this._byPointer.get(pointerId);
-        if (previous && previous !== button) this._letGo(previous, pointerId);
+    private _update(x: number, y: number): void {
+        const c = cfg.controls;
+        const dx = x - this._hit.x;
+        const dy = y - this._hit.y;
+        const distance = Math.hypot(dx, dy);
+        const clampedDistance = Math.min(distance, c.travelRadius);
+        const directionX = distance > 0 ? dx / distance : 0;
+        const directionY = distance > 0 ? dy / distance : 0;
 
-        button.held.add(pointerId);
-        this._byPointer.set(pointerId, button);
-        button.glyph.color = cfg.controls.pressedColor;
+        this._knobNode.x = directionX * clampedDistance;
+        this._knobNode.y = directionY * clampedDistance;
+
+        const rawMagnitude = clampedDistance / c.travelRadius;
+        this.axis = TouchControls._applyDeadZone(directionX * rawMagnitude, c.deadZone);
+        this.throttle = TouchControls._applyDeadZone(directionY * rawMagnitude, c.deadZone);
     }
 
-    private _release(e: any): void {
-        const pointerId = e.pointer.id;
-        const button = this._byPointer.get(pointerId);
-        if (button) this._letGo(button, pointerId);
-        this._byPointer.delete(pointerId);
-        this._zonePointers.delete(pointerId);
-    }
-
-    private _letGo(button: Button, pointerId: number): void {
-        button.held.delete(pointerId);
-        if (button.held.size === 0) button.glyph.color = cfg.controls.color;
+    private static _applyDeadZone(value: number, deadZone: number): number {
+        const magnitude = Math.abs(value);
+        if (magnitude <= deadZone) return 0;
+        return Math.sign(value) * Math.min(1, (magnitude - deadZone) / (1 - deadZone));
     }
 }

@@ -1,5 +1,5 @@
-import { inputListener, Input } from 'noonengine';
-import { TouchControls, Control } from '../ui/TouchControls';
+import { inputListener, Input, Node } from 'noonengine';
+import { TouchControls } from '../ui/TouchControls';
 
 const LEFT_KEYS = ['ArrowLeft', 'KeyA'];
 const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
@@ -8,18 +8,18 @@ const BRAKE_KEYS = ['ArrowDown', 'KeyS'];
 const TAP_KEYS = ['Space', 'Enter'];
 
 /**
- * InputController — collapses keyboard and the on-screen buttons into two axes.
+ * InputController — collapses keyboard and the virtual joystick into two axes.
  *
  * `axis` is -1 (full left) … +1 (full right); `throttle` is +1 gas, -1 manual
  * brake, 0 released/automatic brake. Both are SAMPLED each frame, so a held
- * key and a held button behave identically and neither can miss a frame.
+ * key and a held joystick behave identically and neither can miss a frame.
  *
  * Keyboard goes through the `inputListener` singleton because KEY_DOWN/KEY_UP
  * are NOT spatial events — `node.on(Input.KEY_DOWN, ...)` routes to the node's
  * own emitter and would never fire. See ARCHITECTURE.md §3 item 11.
  *
- * Touch comes from `TouchControls`: the screen halves steer, while dedicated
- * gas/brake targets provide the second axis and are excluded from those zones.
+ * Touch comes from `TouchControls`: horizontal drag steers, vertical drag
+ * controls gas/brake, and diagonal drag produces both at once.
  */
 export class InputController {
 
@@ -33,6 +33,8 @@ export class InputController {
     hasSteered = false;
 
     private _controls: TouchControls;
+    /** UI taps that perform their own action and must not restart a finished run. */
+    private _ignoredTapTargets = new Set<Node>();
     /** A press that hasn't been consumed yet — drives the restart prompt. */
     private _tapPending = false;
 
@@ -42,7 +44,7 @@ export class InputController {
 
     attach(): void {
         // Target-less, so a press ANYWHERE counts as the restart tap. Steering
-        // and throttle come from the buttons, not from this.
+        // and throttle come from the joystick, not from this.
         inputListener.on(Input.POINTER_DOWN, this._onDown, null, this);
     }
 
@@ -64,9 +66,13 @@ export class InputController {
         return tapped;
     }
 
+    ignoreTapTarget(node: Node): void {
+        this._ignoredTapTargets.add(node);
+    }
+
     /**
      * Drops every hold, so a finger still down from the restart tap doesn't
-     * immediately steer or accelerate. Buttons re-arm on the next real press.
+     * immediately steer or accelerate. The joystick re-arms on a new press.
      */
     clearHold(): void {
         this._controls.clear();
@@ -79,20 +85,18 @@ export class InputController {
     sample(): void {
         if (TAP_KEYS.some(k => inputListener.isKeyDown(k))) this._tapPending = true;
 
-        // Keyboard wins while a key is held; otherwise the buttons. They're
-        // rarely both present, and this keeps a stuck button from fighting the
+        // Keyboard wins while a key is held; otherwise the joystick. They're
+        // rarely both present, and this keeps a stuck touch from fighting the
         // keyboard during desktop testing.
         this.axis = InputController._pick(
             this._held(LEFT_KEYS, RIGHT_KEYS),
-            (this._controls.isHeld(Control.STEER_RIGHT) ? 1 : 0)
-            - (this._controls.isHeld(Control.STEER_LEFT) ? 1 : 0),
+            this._controls.axis,
         );
         if (this.axis !== 0) this.hasSteered = true;
 
         this.throttle = InputController._pick(
             this._held(BRAKE_KEYS, GAS_KEYS),
-            (this._controls.isHeld(Control.GAS) ? 1 : 0)
-            - (this._controls.isHeld(Control.BRAKE) ? 1 : 0),
+            this._controls.throttle,
         );
     }
 
@@ -108,7 +112,8 @@ export class InputController {
         return keyboard !== 0 ? keyboard : touch;
     }
 
-    private _onDown(): void {
+    private _onDown(e: any): void {
+        if (this._ignoredTapTargets.has(e.target)) return;
         this._tapPending = true;
     }
 }
