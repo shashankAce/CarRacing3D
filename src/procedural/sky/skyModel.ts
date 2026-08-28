@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
+import { environmentSkyPreset } from '../../config/environment';
 
 /**
  * skyModel — the dome's shading, on the CPU.
@@ -60,11 +61,12 @@ const norm = (v: [number, number, number]): [number, number, number] => {
  */
 export function skyColorAt(dir: [number, number, number], out: THREE.Color = new THREE.Color()): THREE.Color {
     const s = cfg.sky;
+    const palette = environmentSkyPreset();
     const d = norm(dir);
     const day = Math.max(0, Math.min(1, s.dayFactor));
 
-    const horizon = new THREE.Color(s.horizonLowColor).lerp(new THREE.Color(s.horizonColor), day);
-    const zenith = new THREE.Color(s.zenithLowColor).lerp(new THREE.Color(s.zenithColor), day);
+    const horizon = new THREE.Color(palette.horizonLow).lerp(new THREE.Color(palette.horizon), day);
+    const zenith = new THREE.Color(palette.zenithLow).lerp(new THREE.Color(palette.zenith), day);
 
     const t = Math.pow(smoothstep(s.skyTopHeight, Math.max(d[1], 0)), s.horizonHold);
     out.copy(horizon).lerp(zenith, t);
@@ -83,7 +85,7 @@ export function skyColorAt(dir: [number, number, number], out: THREE.Color = new
     const moonTerm = moonUp * (Math.pow(moonDot, m.discExp) * m.discAmp
         + Math.pow(moonDot, m.haloExp) * m.haloAmp);
 
-    const glow = new THREE.Color(cfg.sky.sunGlowColor);
+    const glow = new THREE.Color(palette.glow);
     const moonColor = new THREE.Color(cfg.lighting.moonColor);
     out.r = Math.min(1, out.r + glow.r * sunTerm + moonColor.r * moonTerm);
     out.g = Math.min(1, out.g + glow.g * sunTerm + moonColor.g * moonTerm);

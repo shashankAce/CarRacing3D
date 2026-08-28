@@ -10,6 +10,7 @@ import { FollowCamera } from '../game/FollowCamera';
 import { RoadMarkers } from '../world/RoadMarkers';
 import { TerrainStreamer } from '../world/TerrainStreamer';
 import { ScatterStreamer } from '../world/ScatterStreamer';
+import { DesertScatterStreamer } from '../world/DesertScatterStreamer';
 import { RoadMesh } from '../world/RoadMesh';
 import { ProjectedShadows } from '../world/ProjectedShadows';
 import { TreeShadowMask } from '../world/TreeShadowMask';
@@ -18,9 +19,11 @@ import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
+import { EnvironmentToggle } from '../ui/EnvironmentToggle';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
 import { VehicleModels, type VehicleModelId } from '../assets/VehicleModels';
+import { activeEnvironment, toggleEnvironment, type EnvironmentId } from '../config/environment';
 
 /**
  * GameScene — Phase 5: player throttle and fuel.
@@ -56,10 +59,12 @@ export class GameScene extends Scene {
     /** Kept from `onRendererReady` so the tree mask can be rendered each frame. */
     private _renderer: THREE.WebGLRenderer | null = null;
     private _scatter: ScatterStreamer;
+    private _desertScatter: DesertScatterStreamer;
     private _traffic: TrafficSystem;
     private _hud: Hud;
     private _gameOver: GameOverPanel;
     private _carSelect: CarSelectPanel;
+    private _environmentToggle: EnvironmentToggle;
     private _vehicleModels: VehicleModels;
     private _vehiclesReady = false;
     private _selectingCar = true;
@@ -134,10 +139,14 @@ export class GameScene extends Scene {
         // window is built in full before the first frame rather than one chunk
         // at a time.
         this._scatter = new ScatterStreamer(this, this._state.scroll);
+        this._desertScatter = new DesertScatterStreamer(this, this._state.scroll);
+        this._scatter.setVisible(activeEnvironment() === 'forest');
+        this._desertScatter.setVisible(activeEnvironment() === 'desert');
         this._terrain.buildAllNow();
         this._road.update();
         // Registered before the first scatter sync, which is what feeds it.
         this._scatter.setTreeShadowMask(this._treeMask);
+        this._desertScatter.setTreeShadowMask(this._treeMask);
         this._syncScatter();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
@@ -175,6 +184,8 @@ export class GameScene extends Scene {
         this._gameOver = new GameOverPanel(this);
         this._vehicleModels = new VehicleModels();
         this._carSelect = new CarSelectPanel(this, (id) => this._selectCar(id));
+        this._environmentToggle = new EnvironmentToggle(this, activeEnvironment(), () => this._switchEnvironment());
+        this._controls.ignoreTarget(this._environmentToggle.node);
         if (cfg.debug.showPerf) {
             this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
             // Debug bisection hook for the tree mask; see `debugStats`.
@@ -323,7 +334,33 @@ export class GameScene extends Scene {
      * recycled.
      */
     private _syncScatter(): void {
-        this._scatter.update(this._terrain.liveChunkKeys(), TerrainStreamer.decodeKey);
+        const keys = this._terrain.liveChunkKeys();
+        if (activeEnvironment() === 'desert') {
+            this._desertScatter.update(keys, TerrainStreamer.decodeKey);
+        } else {
+            this._scatter.update(keys, TerrainStreamer.decodeKey);
+        }
+    }
+
+    /** Swaps the complete visual biome while preserving the current run state. */
+    private _switchEnvironment(): EnvironmentId {
+        const id = toggleEnvironment();
+        this._discardSelectionTap = true;
+        this._scatter.setVisible(id === 'forest');
+        this._desertScatter.setVisible(id === 'desert');
+
+        // Terrain colour is baked per vertex, so repaint the resident pool now.
+        this._terrain.refreshAllNow();
+        if (id === 'forest') this._scatter.reset();
+        else this._desertScatter.reset();
+        this._syncScatter();
+
+        this._sky.refreshEnvironment();
+        const horizon = effectiveHorizonColor();
+        this.threeSceneSystem.scene.background = horizon;
+        const fog = this.threeSceneSystem.scene.fog;
+        if (fog instanceof THREE.FogExp2) fog.color.copy(horizon);
+        return id;
     }
 
     private _endRun(title: string): void {
@@ -351,6 +388,7 @@ export class GameScene extends Scene {
         this._terrain.buildAllNow();
         this._road.update();
         this._scatter.reset();
+        this._desertScatter.reset();
         this._syncScatter();
         this._markers.update();
         this._camera.snapTo(this._car);

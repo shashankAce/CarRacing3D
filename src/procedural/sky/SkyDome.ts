@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../../config/gameConfig';
+import { environmentSkyPreset } from '../../config/environment';
 import { deriveFogColor } from './skyModel';
 
 /**
@@ -68,6 +69,7 @@ export class SkyDome {
 
     constructor(scene: THREE.Scene) {
         const s = cfg.sky;
+        const palette = environmentSkyPreset();
         // The TRUE sun and moon, not the lighting direction — the dome has to
         // draw the moon while gating the sun's glow off, so it needs both
         // regardless of which one is lighting the scene.
@@ -78,11 +80,11 @@ export class SkyDome {
             vertexShader: VERTEX_SHADER,
             fragmentShader: buildFragmentShader(),
             uniforms: {
-                uZenithColor: { value: new THREE.Color(s.zenithColor) },
-                uZenithLowColor: { value: new THREE.Color(s.zenithLowColor) },
-                uHorizonColor: { value: new THREE.Color(s.horizonColor) },
-                uHorizonSunsetColor: { value: new THREE.Color(s.horizonLowColor) },
-                uSunGlowColor: { value: new THREE.Color(s.sunGlowColor) },
+                uZenithColor: { value: new THREE.Color(palette.zenith) },
+                uZenithLowColor: { value: new THREE.Color(palette.zenithLow) },
+                uHorizonColor: { value: new THREE.Color(palette.horizon) },
+                uHorizonSunsetColor: { value: new THREE.Color(palette.horizonLow) },
+                uSunGlowColor: { value: new THREE.Color(palette.glow) },
                 uSunDirection: { value: new THREE.Vector3(sun.x, sun.y, sun.z).normalize() },
                 uMoonDirection: { value: new THREE.Vector3(moon.x, moon.y, moon.z).normalize() },
                 uMoonColor: { value: new THREE.Color(cfg.lighting.moonColor) },
@@ -105,6 +107,16 @@ export class SkyDome {
         // moving with the camera every frame is wasted work.
         this._mesh.frustumCulled = false;
         scene.add(this._mesh);
+    }
+
+    /** Repaints the dome without rebuilding its geometry or shader program. */
+    refreshEnvironment(): void {
+        const palette = environmentSkyPreset();
+        (this._material.uniforms.uZenithColor.value as THREE.Color).set(palette.zenith);
+        (this._material.uniforms.uZenithLowColor.value as THREE.Color).set(palette.zenithLow);
+        (this._material.uniforms.uHorizonColor.value as THREE.Color).set(palette.horizon);
+        (this._material.uniforms.uHorizonSunsetColor.value as THREE.Color).set(palette.horizonLow);
+        (this._material.uniforms.uSunGlowColor.value as THREE.Color).set(palette.glow);
     }
 
     /**

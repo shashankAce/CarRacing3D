@@ -79,6 +79,43 @@ export const gameConfig = {
         },
     },
 
+    /** Runtime-selectable world looks. Forest keeps the original palette. */
+    environments: {
+        default: 'forest',
+        forest: {
+            label: 'FOREST',
+            terrain: {
+                low: 0x6a874d,
+                high: 0xb7b562,
+                dirt: 0x7a4f2a,
+                rock: 0xd3ad89,
+            },
+            sky: {
+                zenith: 0x4a94b8,
+                zenithLow: 0x4a3a78,
+                horizon: 0x7fc2ea,
+                horizonLow: 0xef8f52,
+                glow: 0xfff2c8,
+            },
+        },
+        desert: {
+            label: 'DESERT',
+            terrain: {
+                low: 0xb9783e,
+                high: 0xe2b86f,
+                dirt: 0xa65f32,
+                rock: 0x8c6047,
+            },
+            sky: {
+                zenith: 0x62a6c8,
+                zenithLow: 0x684b75,
+                horizon: 0xe5c58f,
+                horizonLow: 0xf28b4b,
+                glow: 0xffe0a3,
+            },
+        },
+    },
+
     /**
      * Road geometry. `halfWidth` is the lateral clamp on the player, the width
      * of the asphalt ribbon, AND the half-width of the corridor the terrain
@@ -680,6 +717,18 @@ export const gameConfig = {
         steerY: 140,
         gasY: 250,
         brakeY: 80,
+    },
+
+    /** Small in-game button used to swap the active environment. */
+    environmentToggle: {
+        width: 180,
+        height: 64,
+        edgeMargin: 22,
+        y: 1190,
+        fontSize: 18,
+        color: '#fff3d2',
+        pressedColor: '#ffd05a',
+        prefix: 'BIOME',
     },
 
 
@@ -1418,6 +1467,23 @@ export const gameConfig = {
         maxFarInstances: 700,
         /** Sunk slightly so the trunk grows out of the ground, not onto it. */
         sinkDepth: 0.25,
+    },
+
+    /** Sparse low-poly scenery used by the desert biome. */
+    desertProps: {
+        variants: 4,
+        spacing: 24,
+        roadClearance: 11,
+        maxSlope: 0.62,
+        densityCutoff: 0.34,
+        densityFrequency: 0.0105,
+        maxPerVariant: 180,
+        maxChunksAhead: 5,
+        sinkDepth: 0.12,
+        cactusColor: 0x47724f,
+        cactusHighlight: 0x6e9360,
+        rockLowColor: 0x78503e,
+        rockHighColor: 0xb77b54,
     },
 
     /**

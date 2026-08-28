@@ -165,6 +165,12 @@ export class ScatterStreamer {
         }
     }
 
+    /** Keeps the pooled forest resident while another biome is active. */
+    setVisible(visible: boolean): void {
+        for (const mesh of this._meshes) mesh.object3D.visible = visible;
+        for (const variant of this._variants) variant.far.object3D.visible = visible;
+    }
+
     /**
      * Bakes each variant's impostor. Must be called once the WebGL renderer
      * exists — the engine creates it lazily on the first frame, so the scene

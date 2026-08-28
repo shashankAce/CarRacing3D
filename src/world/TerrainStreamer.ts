@@ -306,4 +306,15 @@ export class TerrainStreamer {
         this.initialBuildMs = performance.now() - started;
         this._recordStats = true;
     }
+
+    /** Re-bakes vertex colours for every resident chunk after a biome change. */
+    refreshAllNow(): void {
+        this._recordStats = false;
+        const started = performance.now();
+        for (const slot of this._slots) {
+            if (slot.inUse && slot.ready) this._build(slot);
+        }
+        this.initialBuildMs = performance.now() - started;
+        this._recordStats = true;
+    }
 }

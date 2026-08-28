@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../config/gameConfig';
+import { activeEnvironment } from '../config/environment';
 import { smoothstep } from './math';
 
 /**
@@ -34,10 +35,20 @@ import { smoothstep } from './math';
  * use THREE.Color. Per-vertex interpolation below stays plain arithmetic — the
  * allocation-free part is the hot loop, not these four constants.
  */
-const GRASS_LOW = new THREE.Color(cfg.colors.terrain.grassLow);
-const GRASS_HIGH = new THREE.Color(cfg.colors.terrain.grassHigh);
-const DIRT = new THREE.Color(cfg.colors.terrain.dirt);
-const ROCK = new THREE.Color(cfg.colors.terrain.rock);
+const PALETTES = {
+    forest: {
+        low: new THREE.Color(cfg.environments.forest.terrain.low),
+        high: new THREE.Color(cfg.environments.forest.terrain.high),
+        dirt: new THREE.Color(cfg.environments.forest.terrain.dirt),
+        rock: new THREE.Color(cfg.environments.forest.terrain.rock),
+    },
+    desert: {
+        low: new THREE.Color(cfg.environments.desert.terrain.low),
+        high: new THREE.Color(cfg.environments.desert.terrain.high),
+        dirt: new THREE.Color(cfg.environments.desert.terrain.dirt),
+        rock: new THREE.Color(cfg.environments.desert.terrain.rock),
+    },
+};
 
 /** High-contrast band colours for `debug.showSlopeBands`. */
 const DEBUG_GRASS = new THREE.Color(0x0033ff);
@@ -70,6 +81,7 @@ export function terrainColorAt(
     normalY: number,
     out: { r: number; g: number; b: number },
 ): void {
+    const palette = PALETTES[activeEnvironment()];
     const dirtT = smoothstep(DIRT_START_NY, DIRT_FULL_NY, normalY);
     // Rock from steepness OR from altitude, whichever is stronger. Slope alone
     // is enough for hills, but a mountain has broad gentle flanks high up that
@@ -89,16 +101,16 @@ export function terrainColorAt(
     // Height ramp: darker green in the hollows, lighter on the rises.
     const amp = cfg.terrain.amplitude;
     const heightT = smoothstep(-amp, amp, y);
-    let r = GRASS_LOW.r + (GRASS_HIGH.r - GRASS_LOW.r) * heightT;
-    let g = GRASS_LOW.g + (GRASS_HIGH.g - GRASS_LOW.g) * heightT;
-    let b = GRASS_LOW.b + (GRASS_HIGH.b - GRASS_LOW.b) * heightT;
+    let r = palette.low.r + (palette.high.r - palette.low.r) * heightT;
+    let g = palette.low.g + (palette.high.g - palette.low.g) * heightT;
+    let b = palette.low.b + (palette.high.b - palette.low.b) * heightT;
 
     // Slope ramps: grass → dirt → bare rock as the ground steepens.
-    r += (DIRT.r - r) * dirtT;
-    g += (DIRT.g - g) * dirtT;
-    b += (DIRT.b - b) * dirtT;
+    r += (palette.dirt.r - r) * dirtT;
+    g += (palette.dirt.g - g) * dirtT;
+    b += (palette.dirt.b - b) * dirtT;
 
-    out.r = r + (ROCK.r - r) * rockT;
-    out.g = g + (ROCK.g - g) * rockT;
-    out.b = b + (ROCK.b - b) * rockT;
+    out.r = r + (palette.rock.r - r) * rockT;
+    out.g = g + (palette.rock.g - g) * rockT;
+    out.b = b + (palette.rock.b - b) * rockT;
 }

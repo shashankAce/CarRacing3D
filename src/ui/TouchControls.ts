@@ -49,6 +49,8 @@ export class TouchControls {
     private _zonePointers = new Set<number>();
     private _screenWidth: number;
     private _enabled = false;
+    /** UI elements that must not also start full-screen steering. */
+    private _ignoredTargets = new Set<Node>();
 
     constructor(scene: Scene) {
         const c = cfg.controls;
@@ -107,6 +109,10 @@ export class TouchControls {
         return this._buttons[control].held.size > 0;
     }
 
+    ignoreTarget(node: Node): void {
+        this._ignoredTargets.add(node);
+    }
+
     /** Enables or hides the complete touch-control layer, e.g. for menus. */
     setEnabled(enabled: boolean): void {
         this._enabled = enabled;
@@ -127,6 +133,7 @@ export class TouchControls {
     /** Starts steering from either screen half, except over gas/brake. */
     private _zoneDown(e: any): void {
         if (!this._enabled || e.pointer.pointerType !== 'touch') return;
+        if (this._ignoredTargets.has(e.target)) return;
         if (e.target === this._buttons[Control.GAS].hit
             || e.target === this._buttons[Control.BRAKE].hit) return;
 
