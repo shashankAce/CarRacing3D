@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
+This file provides guidance to AI when working in this repository.
 
 > **Before writing any code, read [ARCHITECTURE.md](ARCHITECTURE.md) and
 > [AI_WORKFLOW.md](AI_WORKFLOW.md) in full.**
