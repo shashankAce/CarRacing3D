@@ -282,7 +282,7 @@ export class GameScene extends Scene {
 
             // Collision AFTER both have moved this frame, so neither is tested
             // against the other's previous position.
-            const hit = findCollision(this._car, travelled, this._traffic);
+            const hit = findCollision(this._car, this._traffic);
             if (hit) this._endRun(cfg.hud.gameOverText);
             // Fuel is checked after the collision, so a crash on the last drop
             // of fuel reports as a crash rather than as an empty tank.

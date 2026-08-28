@@ -81,23 +81,28 @@ const _trafficRect: CollisionRect = { x: 0, z: 0, halfWidth: 0, halfLength: 0, y
  * Both boxes rotate with their vehicles. SAT tests the two local axes from
  * each rectangle, avoiding the false positives produced by the old expanded
  * AABB when a car was steering or traffic was following a bend.
+ *
+ * Centres and yaw MUST come from the same coordinate space. Render Z mirrors
+ * world Z (`renderZ = travelled - worldZ`), which also mirrors yaw. Mixing
+ * absolute world-Z centres with render-space object yaw made SAT disagree with
+ * the visible/debug boxes. Reading both from current render transforms keeps
+ * collision exactly on the frame the player sees.
  */
 export function findCollision(
     car: PlayerCar,
-    travelled: number,
     traffic: TrafficSystem,
 ): TrafficVehicle | null {
-    const carWorldZ = travelled - car.position.z;
     setCollisionRect(
-        _carRect, 'player', car.position.x, carWorldZ,
+        _carRect, 'player', car.position.x, car.position.z,
         car.halfWidth, car.halfLength, car.rotationY,
     );
 
     for (const v of traffic.vehicles) {
         if (!v.active) continue;
+        const trafficTransform = v.group.object3D;
         setCollisionRect(
-            _trafficRect, 'traffic', traffic.worldXOf(v), v.worldZ,
-            v.halfWidth, v.halfLength, v.group.object3D.rotation.y,
+            _trafficRect, 'traffic', trafficTransform.position.x, trafficTransform.position.z,
+            v.halfWidth, v.halfLength, trafficTransform.rotation.y,
         );
         if (orientedBoxesOverlap(_carRect, _trafficRect)) return v;
     }
