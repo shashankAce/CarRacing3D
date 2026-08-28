@@ -71,6 +71,8 @@ export class TerrainStreamer {
 
     get pendingBuilds(): number { return this._queue.length; }
     get residentChunks(): number { return this._byKey.size; }
+    get initialBuildTotal(): number { return this._slots.length; }
+    get initialBuildCompleted(): number { return this._slots.length - this._queue.length; }
 
     /** Clears the rolling peak so it tracks the recent worst, not the startup burst. */
     resetPeak(): void { this.peakBuildMs = 0; }
@@ -307,6 +309,28 @@ export class TerrainStreamer {
         }
 
         this.initialBuildMs = performance.now() - started;
+        this._recordStats = true;
+    }
+
+    /** Begins the opening build without blocking the first rendered loading frame. */
+    beginInitialBuild(): void {
+        this._recordStats = false;
+        this.initialBuildMs = -performance.now();
+        this._lastBaseCz = Number.NaN;
+        this._retargetWindow(Math.floor(this._scroll.travelled / cfg.terrain.chunkLength));
+    }
+
+    /** Builds one opening chunk. Returns false after the complete window is ready. */
+    buildInitialChunk(): boolean {
+        const slot = this._queue.shift();
+        if (!slot) return false;
+        if (slot.inUse) this._build(slot);
+        return this._queue.length > 0;
+    }
+
+    /** Restores normal runtime diagnostics after incremental startup generation. */
+    finishInitialBuild(): void {
+        this.initialBuildMs += performance.now();
         this._recordStats = true;
     }
 

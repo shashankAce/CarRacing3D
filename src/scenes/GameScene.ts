@@ -19,6 +19,7 @@ import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
+import { LoadingScreen, type LoadingStage } from '../ui/LoadingScreen';
 import { EnvironmentToggle } from '../ui/EnvironmentToggle';
 import { FullscreenButton } from '../ui/FullscreenButton';
 import { CollisionDebugDraw } from '../ui/CollisionDebugDraw';
@@ -72,6 +73,7 @@ export class GameScene extends Scene {
     private _hud: Hud;
     private _gameOver: GameOverPanel;
     private _carSelect: CarSelectPanel;
+    private _loading: LoadingScreen;
     private _environmentToggle: EnvironmentToggle;
     private _fullscreenButton: FullscreenButton;
     private _collisionDebug: CollisionDebugDraw | null = null;
@@ -84,6 +86,17 @@ export class GameScene extends Scene {
     private _sky: SkyDome;
     private _clouds: CloudSprites;
     private _lastEnvironmentBlend = Number.NaN;
+    private _startupStage: LoadingStage | null = 'assets';
+    private _modelsReady = false;
+    private _initialWorldStarted = false;
+    private _shadowBakeStep = 0;
+
+    constructor(
+        private readonly _reportLoadProgress: (progress: number) => void = () => {},
+        private readonly _notifyReady: () => void = () => {},
+    ) {
+        super();
+    }
 
     onLoad(): void {
         // Idempotent — the engine config already ran this, but calling it here
@@ -102,20 +115,8 @@ export class GameScene extends Scene {
         // The renderer is created lazily on the first frame, so this callback
         // is the only correct place to configure it.
         sys.onRendererReady = (renderer) => {
-            // Distant trees are billboards carrying a baked image of their own
-            // mesh. Baking needs a renderer, and the engine creates one lazily
-            // on the first frame — this callback is the earliest point it
-            // exists. Until then the far tier is invisible rather than
-            // untextured.
-            this._scatter.bakeImpostors(renderer as THREE.WebGLRenderer);
-            // The silhouette atlas: one render per caster type, once, then the
-            // receiver shaders sample it forever. Must exist before the first
-            // frame or receivers read a null sampler.
-            this._projected.bake(renderer as THREE.WebGLRenderer);
-            this._treeMask?.bake(renderer as THREE.WebGLRenderer);
-            // The red channel's metre scale is only known once the atlas has
-            // measured the tallest caster.
-            if (this._treeMask) this._projected.setTreeMaskHeightScale(this._treeMask.heightScale);
+            // Startup owns renderer-dependent work so the loading screen can
+            // report the real shadow and impostor bake rather than a timer.
             this._renderer = renderer as THREE.WebGLRenderer;
         };
 
@@ -147,21 +148,16 @@ export class GameScene extends Scene {
         // scene, so there's no Node lifecycle for a wrapper to manage.
         this._terrain = new TerrainStreamer(sys.scene, this._state.scroll);
         this._road = new RoadMesh(sys.scene, this._state.scroll);
-        // The player must never watch the world assemble itself, so the opening
-        // window is built in full before the first frame rather than one chunk
-        // at a time.
         this._scatter = new ScatterStreamer(this, this._state.scroll);
         this._desertScatter = new DesertScatterStreamer(this, this._state.scroll);
         // Both pools stay live: their placement density cross-fades spatially
         // through each forest/desert transition.
         this._scatter.setVisible(true);
         this._desertScatter.setVisible(true);
-        this._terrain.buildAllNow();
-        this._road.update();
-        // Registered before the first scatter sync, which is what feeds it.
+        // Registered before the first scatter sync, which happens only after
+        // every opening terrain chunk is ready behind the loading overlay.
         this._scatter.setTreeShadowMask(this._treeMask);
         this._desertScatter.setTreeShadowMask(this._treeMask);
-        this._syncScatter();
 
         this._markers = new RoadMarkers(this, this._state.scroll);
         this._traffic = new TrafficSystem(this);
@@ -204,6 +200,8 @@ export class GameScene extends Scene {
         this._environmentToggle = new EnvironmentToggle(this, activeEnvironment(), () => this._switchEnvironment());
         this._fullscreenButton = new FullscreenButton(this);
         this._input.ignoreTapTarget(this._fullscreenButton.node);
+        this._loading = new LoadingScreen(this);
+        this._setLoadingProgress('assets', 0);
         if (cfg.debug.showPerf) {
             this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
             // Debug bisection hook for the tree mask; see `debugStats`.
@@ -216,9 +214,8 @@ export class GameScene extends Scene {
             });
         }
 
-        // Asset loading is intentionally asynchronous: the engine can render
-        // its loading label immediately, while gameplay remains paused until a
-        // player has selected a fully-loaded FBX model.
+        // Asset loading starts after the overlay exists, and the loading state
+        // machine starts world generation only after model compilation ends.
         void this._loadVehicleModels();
     }
 
@@ -272,6 +269,15 @@ export class GameScene extends Scene {
      * nothing in a frame is ever reading last frame's state.
      */
     update(dt: number): void {
+        if (this._startupStage) {
+            this._advanceStartup();
+            this._camera.update(dt, this._car, 0);
+            this._updateSun();
+            this._sky.update(this._camera.position);
+            this._clouds.update(dt, this._camera.position);
+            return;
+        }
+
         if (this._selectingCar) {
             this._camera.update(dt, this._car, 0);
             this._updateSun();
@@ -429,16 +435,88 @@ export class GameScene extends Scene {
     /** Load all static model templates once, then allocate every traffic clone up front. */
     private async _loadVehicleModels(): Promise<void> {
         try {
-            await this._vehicleModels.load();
+            await this._vehicleModels.load((stage, progress) => this._setLoadingProgress(stage, progress));
             this._traffic.attachModels(this._vehicleModels);
             this._traffic.refreshProjectedGeometry(this._projected);
-            this._projected.rebake();
             this._attachTrafficMaterials();
             this._vehiclesReady = true;
-            this._carSelect.show();
+            this._modelsReady = true;
+            this._setLoadingProgress('world', 0);
         } catch (error) {
             console.error('[vehicles] Failed to load the vehicle catalog.', error);
+            this._startupStage = null;
+            this._loading.showError();
         }
+    }
+
+    /** Advances only one measurable startup task per rendered frame. */
+    private _advanceStartup(): void {
+        if (this._startupStage === 'shadows') {
+            this._advanceShadowBake();
+            return;
+        }
+        if (this._startupStage !== 'world') return;
+        if (!this._modelsReady) return;
+
+        if (!this._initialWorldStarted) {
+            this._initialWorldStarted = true;
+            this._terrain.beginInitialBuild();
+        }
+
+        this._terrain.buildInitialChunk();
+        const total = Math.max(1, this._terrain.initialBuildTotal);
+        this._setLoadingProgress('world', this._terrain.initialBuildCompleted / total);
+        if (this._terrain.pendingBuilds > 0) return;
+
+        this._terrain.finishInitialBuild();
+        this._road.update();
+        this._syncScatter();
+        this._markers.update();
+        this._setLoadingProgress('shadows', 0);
+        this._startupStage = 'shadows';
+    }
+
+    /** Performs renderer-only preparation in small, visible loading steps. */
+    private _advanceShadowBake(): void {
+        if (!this._renderer) return;
+
+        if (this._shadowBakeStep === 0) {
+            this._scatter.bakeImpostors(this._renderer);
+            this._shadowBakeStep++;
+            this._setLoadingProgress('shadows', 0.3);
+            return;
+        }
+        if (this._shadowBakeStep === 1) {
+            this._projected.bake(this._renderer);
+            this._shadowBakeStep++;
+            this._setLoadingProgress('shadows', 0.7);
+            return;
+        }
+        if (this._shadowBakeStep === 2) {
+            this._treeMask?.bake(this._renderer);
+            if (this._treeMask) this._projected.setTreeMaskHeightScale(this._treeMask.heightScale);
+            this._shadowBakeStep++;
+            this._setLoadingProgress('shadows', 1);
+            return;
+        }
+
+        this._startupStage = null;
+        this._loading.hide();
+        this._carSelect.show();
+        this._notifyReady();
+    }
+
+    /** Maps a phase-local measurement into the one overall loading bar. */
+    private _setLoadingProgress(stage: LoadingStage, progress: number): void {
+        const weights = cfg.loading.weights;
+        const completed = stage === 'assets' ? 0
+            : stage === 'compile' ? weights.assets
+                : stage === 'world' ? weights.assets + weights.compile
+                    : weights.assets + weights.compile + weights.world;
+        const total = completed + weights[stage] * Math.min(1, Math.max(0, progress));
+        this._startupStage = stage;
+        this._loading?.setProgress(stage, progress, total);
+        this._reportLoadProgress(total);
     }
 
     private _selectCar(id: VehicleModelId): void {

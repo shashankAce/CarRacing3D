@@ -5,6 +5,8 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 export type VehicleModelId = string;
+export type VehicleLoadStage = 'assets' | 'compile';
+export type VehicleLoadProgress = (stage: VehicleLoadStage, progress: number) => void;
 
 export interface VehicleVisual {
     root: THREE.Object3D;
@@ -54,21 +56,24 @@ export class VehicleModels {
     /** Shared test-wheel shape, fitted to each source wheel at template build time. */
     private _testWheel: THREE.BufferGeometry | null = null;
 
-    async load(): Promise<void> {
+    async load(onProgress?: VehicleLoadProgress): Promise<void> {
         const cache = assetCache;
         if (!cache) throw new Error('Vehicle models were requested before AssetCache was initialized.');
 
         await cache.preloadAssets([
             { src: cfg.vehicles.paletteTexture, type: 'image', alias: PALETTE_ASSET_ALIAS },
-        ]);
+        ], (progress) => onProgress?.('assets', progress / (cfg.vehicles.models.length + 1)));
         const paletteImage = cache.getAsset(PALETTE_ASSET_ALIAS);
         if (!(paletteImage instanceof HTMLImageElement)) {
             throw new Error(`Vehicle palette "${cfg.vehicles.paletteTexture}" was not loaded as an image.`);
         }
 
-        const assets = await Promise.all(
-            cfg.vehicles.models.map((spec) => cache.loadModel(spec.asset, `vehicle:${spec.id}`)),
-        );
+        const assets = [];
+        for (let i = 0; i < cfg.vehicles.models.length; i++) {
+            const spec = cfg.vehicles.models[i];
+            assets.push(await cache.loadModel(spec.asset, `vehicle:${spec.id}`));
+            onProgress?.('assets', (i + 2) / (cfg.vehicles.models.length + 1));
+        }
         // AssetCache owns every file-backed source. Three only wraps the
         // already-cached image so the palette can be sampled by MeshStandardMaterial.
         const palette = new THREE.Texture(paletteImage);
@@ -83,11 +88,13 @@ export class VehicleModels {
             : null;
         // Wheel geometry must exist before templates are prepared; otherwise
         // the async asset-load callbacks bake the original FBX tyres instead.
+        onProgress?.('compile', 0);
         for (let i = 0; i < cfg.vehicles.models.length; i++) {
             this._templates.set(
                 cfg.vehicles.models[i].id,
                 this._prepareTemplate(cfg.vehicles.models[i], assets[i].scene),
             );
+            onProgress?.('compile', (i + 1) / cfg.vehicles.models.length);
         }
     }
 

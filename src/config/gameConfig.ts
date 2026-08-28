@@ -811,6 +811,40 @@ export const gameConfig = {
         hintColor: '#c9d9e2',
     },
 
+    /** Startup progress UI and the real work each segment represents. */
+    loading: {
+        title: 'GETTING READY',
+        titleY: 760,
+        statusY: 675,
+        percentY: 570,
+        barY: 610,
+        barWidth: 430,
+        barHeight: 18,
+        titleFontSize: 48,
+        statusFontSize: 30,
+        percentFontSize: 24,
+        titleColor: '#ffffff',
+        statusColor: '#c9d9e2',
+        percentColor: '#9fe8ff',
+        backdropColor: '#09111e',
+        trackColor: '#26384a',
+        fillColor: '#55d9ff',
+        errorText: 'UNABLE TO LOAD VEHICLES',
+        stages: {
+            assets: 'LOADING ASSETS',
+            compile: 'COMPILING ASSETS',
+            world: 'GENERATING PROCEDURAL WORLD',
+            shadows: 'BAKING SHADOWS',
+        },
+        /** The overall bar maps to four measured startup phases, not elapsed time. */
+        weights: {
+            assets: 0.38,
+            compile: 0.26,
+            world: 0.26,
+            shadows: 0.10,
+        },
+    },
+
     /** Player car dimensions and handling. FBX footprint comes from `vehicles.models`. */
     car: {
         width: 2.0,

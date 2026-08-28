@@ -43,10 +43,8 @@ const engine = new GameEngine({
 });
 
 engine.setDesignResolution(cfg.design.width, cfg.design.height, ResolutionPolicy.FIXED_HEIGHT);
-engine.runScene(new GameScene());
+engine.runScene(new GameScene(
+    (progress) => platform.reportProgress(progress),
+    () => { void platform.notifyReady(); },
+));
 engine.start();
-
-// Nothing to preload yet — the world is generated, not loaded. Once there is a
-// real generation step (Phase 6), drive `platform.reportProgress()` from it and
-// move this call to when the game is genuinely playable.
-platform.notifyReady();
