@@ -861,6 +861,20 @@ export const gameConfig = {
         },
     },
 
+    /** Gameplay hitbox tuning, independent of rendered FBX dimensions. */
+    collision: {
+        /** Fraction of the measured player FBX footprint used by its OBB. */
+        player: {
+            widthScale: 0.88,
+            lengthScale: 0.90,
+        },
+        /** Fraction of each measured traffic FBX footprint used by its OBB. */
+        traffic: {
+            widthScale: 0.88,
+            lengthScale: 0.90,
+        },
+    },
+
     /**
      * TPP follow camera. `followRate` feeds exponential damping (§5.6).
      *

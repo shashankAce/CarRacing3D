@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Label, Node, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
+import { setCollisionRect, type CollisionRect } from '../game/Collision';
 import type { PlayerCar } from '../game/PlayerCar';
 import type { TrafficSystem } from '../game/TrafficSystem';
 
@@ -14,6 +15,8 @@ export class CollisionDebugDraw {
     private _labelNode: Node;
     private _label: Label;
     private _lastText = '';
+    private _playerRect: CollisionRect = { x: 0, z: 0, halfWidth: 0, halfLength: 0, yaw: 0 };
+    private _trafficRect: CollisionRect = { x: 0, z: 0, halfWidth: 0, halfLength: 0, yaw: 0 };
 
     constructor(
         scene: Scene,
@@ -64,8 +67,12 @@ export class CollisionDebugDraw {
 
     update(): void {
         const car = this._car;
-        const width = car.halfWidth * 2;
-        const length = car.halfLength * 2;
+        const rect = setCollisionRect(
+            this._playerRect, 'player', car.position.x, car.position.z,
+            car.halfWidth, car.halfLength, car.rotationY,
+        );
+        const width = rect.halfWidth * 2;
+        const length = rect.halfLength * 2;
         const height = car.visualHeight;
 
         this._line.visible = true;
@@ -78,7 +85,8 @@ export class CollisionDebugDraw {
         this._line.scale.set(width, height, length);
 
         const yawDegrees = car.rotationY * 180 / Math.PI;
-        const text = `COLLISION OBB ${this._format(width)} x ${this._format(length)} m`
+        const text = `COLLISION ${this._format(width)} x ${this._format(length)} m`
+            + `   visual ${this._format(car.halfWidth * 2)} x ${this._format(car.halfLength * 2)} m`
             + `   yaw ${yawDegrees.toFixed(1)} deg`;
         if (text !== this._lastText) {
             this._lastText = text;
@@ -95,10 +103,14 @@ export class CollisionDebugDraw {
             }
 
             const obj = vehicle.group.object3D;
+            const trafficRect = setCollisionRect(
+                this._trafficRect, 'traffic', obj.position.x, obj.position.z,
+                vehicle.halfWidth, vehicle.halfLength, obj.rotation.y,
+            );
             line.visible = true;
             line.position.set(obj.position.x, obj.position.y + vehicle.height * 0.5, obj.position.z);
             line.rotation.set(0, obj.rotation.y, 0);
-            line.scale.set(vehicle.halfWidth * 2, vehicle.height, vehicle.halfLength * 2);
+            line.scale.set(trafficRect.halfWidth * 2, vehicle.height, trafficRect.halfLength * 2);
         }
     }
 

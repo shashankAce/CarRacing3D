@@ -10,6 +10,27 @@ export interface CollisionRect {
     yaw: number;
 }
 
+export type CollisionBody = 'player' | 'traffic';
+
+/** Fills an OBB using the independently tunable fraction of its visual bounds. */
+export function setCollisionRect(
+    out: CollisionRect,
+    body: CollisionBody,
+    x: number,
+    z: number,
+    visualHalfWidth: number,
+    visualHalfLength: number,
+    yaw: number,
+): CollisionRect {
+    const tuning = cfg.collision[body];
+    out.x = x;
+    out.z = z;
+    out.halfWidth = visualHalfWidth * tuning.widthScale;
+    out.halfLength = visualHalfLength * tuning.lengthScale;
+    out.yaw = yaw;
+    return out;
+}
+
 /** Exact 2D oriented-box overlap using the four SAT separating axes. */
 export function orientedBoxesOverlap(a: CollisionRect, b: CollisionRect): boolean {
     const ac = Math.cos(a.yaw), as = Math.sin(a.yaw);
@@ -67,19 +88,17 @@ export function findCollision(
     traffic: TrafficSystem,
 ): TrafficVehicle | null {
     const carWorldZ = travelled - car.position.z;
-    _carRect.x = car.position.x;
-    _carRect.z = carWorldZ;
-    _carRect.halfWidth = car.halfWidth;
-    _carRect.halfLength = car.halfLength;
-    _carRect.yaw = car.rotationY;
+    setCollisionRect(
+        _carRect, 'player', car.position.x, carWorldZ,
+        car.halfWidth, car.halfLength, car.rotationY,
+    );
 
     for (const v of traffic.vehicles) {
         if (!v.active) continue;
-        _trafficRect.x = traffic.worldXOf(v);
-        _trafficRect.z = v.worldZ;
-        _trafficRect.halfWidth = v.halfWidth;
-        _trafficRect.halfLength = v.halfLength;
-        _trafficRect.yaw = v.group.object3D.rotation.y;
+        setCollisionRect(
+            _trafficRect, 'traffic', traffic.worldXOf(v), v.worldZ,
+            v.halfWidth, v.halfLength, v.group.object3D.rotation.y,
+        );
         if (orientedBoxesOverlap(_carRect, _trafficRect)) return v;
     }
     return null;
