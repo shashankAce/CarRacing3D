@@ -473,9 +473,11 @@ export const gameConfig = {
             minGapBehind: 12,
             /** m/s² used to converge on a blocker's speed, and to recover after. */
             matchRate: 9,
-            /** Indicator light on the rear corner of the side being moved toward. */
-            indicatorSize: 0.42,
-            indicatorColor: 0xffb020,
+            /** Additive blink laid over the exact red tail-light UV surfaces. */
+            indicatorColor: 0xffffff,
+            indicatorOpacity: 1,// 0-1
+            /** RGB brightness multiplier; values above 1 intensify the additive glow. */
+            indicatorGlowStrength: 2.5,
         },
 
         /**
@@ -1143,7 +1145,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 16,
+            hour: 12,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it

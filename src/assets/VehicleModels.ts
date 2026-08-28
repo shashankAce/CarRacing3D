@@ -15,8 +15,15 @@ export interface VehicleVisual {
     dimensions: { width: number; height: number; length: number };
     /** Static mesh geometry in the vehicle group's local coordinates, for shadow capture. */
     shadowGeometries: THREE.BufferGeometry[];
+    /** Exact rear red-palette surfaces, split for left/right turn signalling. */
+    rearIndicators: RearIndicatorGeometry;
     /** Spins the four custom wheel instances by travelled distance in metres. */
     spinWheels: (distance: number) => void;
+}
+
+export interface RearIndicatorGeometry {
+    left: THREE.BufferGeometry | null;
+    right: THREE.BufferGeometry | null;
 }
 
 type VehicleSpec = typeof cfg.vehicles.models[number];
@@ -29,6 +36,13 @@ interface VehicleTemplate {
     /** Bounds after the configured model scale and rotation have been applied. */
     dimensions: { width: number; height: number; length: number };
     wheels: WheelPlacement[];
+    rearIndicators: RearIndicatorGeometry;
+}
+
+interface PalettePixels {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
 }
 
 interface WheelPlacement {
@@ -53,6 +67,7 @@ export class VehicleModels {
 
     private _templates = new Map<VehicleModelId, VehicleTemplate>();
     private _palette: THREE.Texture | null = null;
+    private _palettePixels: PalettePixels | null = null;
     /** Shared test-wheel shape, fitted to each source wheel at template build time. */
     private _testWheel: THREE.BufferGeometry | null = null;
 
@@ -82,6 +97,7 @@ export class VehicleModels {
         palette.magFilter = THREE.NearestFilter;
         palette.minFilter = THREE.NearestMipmapNearestFilter;
         this._palette = palette;
+        this._palettePixels = readImagePixels(paletteImage);
         this._testWheel?.dispose();
         this._testWheel = cfg.vehicles.testWheels.enabled
             ? createTestWheelGeometry(cfg.vehicles.testWheels)
@@ -102,6 +118,25 @@ export class VehicleModels {
         const spec = cfg.vehicles.models.find((entry) => entry.id === id);
         if (!spec) throw new Error(`Unknown vehicle model "${id}".`);
         return spec;
+    }
+
+    /** Unlit additive copy of the authored red palette surface used while blinking. */
+    createRearIndicatorMaterial(): THREE.MeshBasicMaterial {
+        if (!this._palette) throw new Error('Vehicle indicator material was requested before assets loaded.');
+        const glowColor = new THREE.Color(cfg.traffic.overtake.indicatorColor)
+            .multiplyScalar(cfg.traffic.overtake.indicatorGlowStrength);
+        return new THREE.MeshBasicMaterial({
+            map: this._palette,
+            color: glowColor,
+            transparent: true,
+            opacity: cfg.traffic.overtake.indicatorOpacity,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
+            toneMapped: false,
+        });
     }
 
     create(
@@ -173,7 +208,14 @@ export class VehicleModels {
             }
         }
 
-        return { root, materials, dimensions: template.dimensions, shadowGeometries, spinWheels };
+        return {
+            root,
+            materials,
+            dimensions: template.dimensions,
+            shadowGeometries,
+            rearIndicators: template.rearIndicators,
+            spinWheels,
+        };
     }
 
     /** Builds the compact, normalised static geometry for one FBX once at load. */
@@ -195,6 +237,10 @@ export class VehicleModels {
             distant: new Map(),
             showroom: new Map(),
         };
+        const indicatorParts = {
+            left: [] as THREE.BufferGeometry[],
+            right: [] as THREE.BufferGeometry[],
+        };
         const wheels: WheelPlacement[] = [];
         model.traverse((object) => {
             if (!(object instanceof THREE.Mesh)) return;
@@ -208,6 +254,14 @@ export class VehicleModels {
                 : [{ start: 0, count: object.geometry.getIndex()?.count ?? object.geometry.getAttribute('position').count, materialIndex: 0 }];
             for (const group of groups) {
                 const key = this._materialKey(sourceMaterials[group.materialIndex]?.name);
+                if (key === 'PixelColors') {
+                    this._extractRearIndicatorTriangles(
+                        object,
+                        group.start,
+                        group.count,
+                        indicatorParts,
+                    );
+                }
                 // The showroom always keeps the authored FBX wheels. Gameplay's
                 // full/distant tiers may replace them with the configured test
                 // wheel, so it needs an independent pristine material batch.
@@ -245,10 +299,70 @@ export class VehicleModels {
                 if (parts && parts.length > 0) geometries[detail].set(key, mergeStaticParts(parts));
             }
         }
+        const rearIndicators: RearIndicatorGeometry = {
+            left: indicatorParts.left.length > 0 ? mergeStaticParts(indicatorParts.left) : null,
+            right: indicatorParts.right.length > 0 ? mergeStaticParts(indicatorParts.right) : null,
+        };
         // The distant tier still has only one draw per material class, but its
         // body, wheels, glass, lights, doors and interior have each received
         // the same configurable reduction before batching.
-        return { geometries, dimensions, wheels };
+        return { geometries, dimensions, wheels, rearIndicators };
+    }
+
+    /**
+     * Finds triangles sampling red texels in PixelColors.png on the rear half
+     * of the authored vehicle. The extracted surfaces sit exactly on the FBX
+     * tail lamps, eliminating per-model indicator position and size guesses.
+     */
+    private _extractRearIndicatorTriangles(
+        mesh: THREE.Mesh,
+        start: number,
+        count: number,
+        parts: { left: THREE.BufferGeometry[]; right: THREE.BufferGeometry[] },
+    ): void {
+        if (!this._palettePixels) return;
+        const geometry = mesh.geometry;
+        const index = geometry.getIndex();
+        const position = geometry.getAttribute('position');
+        const uv = geometry.getAttribute('uv');
+        if (!position || !uv) return;
+
+        const centre = new THREE.Vector3();
+        const point = new THREE.Vector3();
+        for (let offset = 0; offset < count; offset += 3) {
+            let u = 0;
+            let v = 0;
+            centre.set(0, 0, 0);
+            for (let corner = 0; corner < 3; corner++) {
+                const attributeIndex = index
+                    ? index.getX(start + offset + corner)
+                    : start + offset + corner;
+                u += uv.getX(attributeIndex);
+                v += uv.getY(attributeIndex);
+                point.fromBufferAttribute(position, attributeIndex).applyMatrix4(mesh.matrixWorld);
+                centre.add(point);
+            }
+            centre.multiplyScalar(1 / 3);
+            // VehicleModels normalises +Z as the rear. Ignore any red body or
+            // dashboard palette entries that happen to exist on the front half.
+            if (centre.z <= 0 || !this._samplesRedPalette(u / 3, v / 3)) continue;
+
+            const triangle = sliceGroup(geometry, start + offset, 3);
+            triangle.applyMatrix4(mesh.matrixWorld);
+            parts[centre.x < 0 ? 'left' : 'right'].push(triangle);
+        }
+    }
+
+    private _samplesRedPalette(u: number, v: number): boolean {
+        const pixels = this._palettePixels!;
+        // Three flips ordinary image textures vertically during upload.
+        const x = Math.min(pixels.width - 1, Math.max(0, Math.floor(u * pixels.width)));
+        const y = Math.min(pixels.height - 1, Math.max(0, Math.floor((1 - v) * pixels.height)));
+        const offset = (y * pixels.width + x) * 4;
+        const red = pixels.data[offset];
+        const green = pixels.data[offset + 1];
+        const blue = pixels.data[offset + 2];
+        return red >= 120 && red > green * 1.7 && red > blue * 1.7;
     }
 
     private _appendBatch(
@@ -325,6 +439,25 @@ export class VehicleModels {
             });
         }
         return new THREE.MeshStandardMaterial({ color: 0x9da9b7, roughness: 0.65 });
+    }
+}
+
+/** Reads the shared palette once so FBX UVs can identify authored red lamps. */
+function readImagePixels(image: HTMLImageElement): PalettePixels | null {
+    try {
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (!context) return null;
+        context.drawImage(image, 0, 0, width, height);
+        return { data: context.getImageData(0, 0, width, height).data, width, height };
+    } catch {
+        // A platform that marks the image canvas as tainted still gets the car;
+        // only the optional extracted blink surface is unavailable.
+        return null;
     }
 }
 

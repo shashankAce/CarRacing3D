@@ -29,7 +29,10 @@ export interface TrafficVehicle {
     fullDetail: boolean;
     /** Fixed per pool slot, so spawning never allocates a new model. */
     modelType: number;
-    indicator: THREE.Mesh;
+    /** Exact FBX tail-light surfaces, illuminated on the signalling side only. */
+    indicator: THREE.Group;
+    indicatorLeft: THREE.Mesh | null;
+    indicatorRight: THREE.Mesh | null;
     active: boolean;
     /** Index into `cfg.traffic.types`. */
     type: number;
@@ -106,8 +109,6 @@ export class TrafficSystem {
         // One geometry for every vehicle: a unit cube, scaled per type. Sharing
         // it means the whole pool is one geometry upload.
         const bodyGeometry = new THREE.BoxGeometry(1, 1, 1);
-        const indicatorGeometry = new THREE.BoxGeometry(1, 1, 1);
-        const indicatorMaterial = new THREE.MeshBasicMaterial({ color: t.overtake.indicatorColor });
         if (t.pool.length !== t.maxAlive) {
             throw new Error('traffic.pool must contain exactly traffic.maxAlive model names.');
         }
@@ -125,9 +126,7 @@ export class TrafficSystem {
             const body = new THREE.Mesh(bodyGeometry, new THREE.MeshBasicMaterial({ visible: false }));
             body.visible = false;
 
-            // Unlit, so it reads as a lamp rather than a painted panel — and it
-            // stays visible on the shadowed side of a vehicle.
-            const indicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
+            const indicator = new THREE.Group();
             indicator.visible = false;
 
             group.object3D.add(body, indicator);
@@ -135,7 +134,8 @@ export class TrafficSystem {
 
             const initialSpec = t.types[slotTypes[i % slotTypes.length]];
             this._pool.push({
-                group, body, indicator, model: null, lodModel: null, fullDetail: true,
+                group, body, indicator, indicatorLeft: null, indicatorRight: null,
+                model: null, lodModel: null, fullDetail: true,
                 spinWheels: () => {}, spinLodWheels: () => {},
                 modelType: slotTypes[i % slotTypes.length], active: false, type: 0,
                 laneF: 0, targetLane: 0, worldZ: 0,
@@ -169,6 +169,7 @@ export class TrafficSystem {
         this._materials = [];
         this._materialsByType = cfg.traffic.types.map(() => [] as THREE.Material[]);
         this._modelShadowGeometries = cfg.traffic.types.map(() => [] as THREE.BufferGeometry[]);
+        const indicatorMaterial = models.createRearIndicatorMaterial();
         for (const v of this._pool) {
             if (v.model) v.group.object3D.remove(v.model);
             if (v.lodModel) v.group.object3D.remove(v.lodModel);
@@ -186,6 +187,17 @@ export class TrafficSystem {
             v.model = visual.root;
             v.spinWheels = visual.spinWheels;
             v.group.object3D.add(v.model);
+
+            v.indicator.clear();
+            v.indicatorLeft = visual.rearIndicators.left
+                ? new THREE.Mesh(visual.rearIndicators.left, indicatorMaterial)
+                : null;
+            v.indicatorRight = visual.rearIndicators.right
+                ? new THREE.Mesh(visual.rearIndicators.right, indicatorMaterial)
+                : null;
+            if (v.indicatorLeft) v.indicator.add(v.indicatorLeft);
+            if (v.indicatorRight) v.indicator.add(v.indicatorRight);
+            v.indicator.visible = false;
             const lodVisual = models.create(spec.model, 'distant');
             // The compact LOD shares the full model's ground-pivot origin.
             v.lodModel = lodVisual.root;
@@ -574,17 +586,10 @@ export class TrafficSystem {
         if (v.signalDir === 0) {
             v.indicator.visible = false;
         } else {
-            const s = cfg.traffic.overtake.indicatorSize;
-            // Rear corner of the side being signalled. Local +Z is the rear,
-            // since forward is -Z. Nudged clear of the body so it isn't half
-            // buried in it.
-            v.indicator.position.set(
-                v.signalDir * (v.halfWidth - s * 0.4),
-                v.height * 0.6,
-                v.halfLength + s * 0.3,
-            );
             const phase = Math.floor(this._blinkClock * cfg.traffic.overtake.blinkHz * 2) % 2;
             v.indicator.visible = phase === 0;
+            if (v.indicatorLeft) v.indicatorLeft.visible = v.signalDir < 0;
+            if (v.indicatorRight) v.indicatorRight.visible = v.signalDir > 0;
         }
     }
 
@@ -623,11 +628,6 @@ export class TrafficSystem {
         slot.signalTimer = 0;
         slot.signalDir = 0;
         slot.laneYaw = 0;
-        // Indicator on the rear face, offset to whichever side is being signalled
-        // — repositioned when a manoeuvre starts, so one mesh covers both sides.
-        const s = t.overtake.indicatorSize;
-        slot.indicator.scale.set(s, s, s * 0.5);
-
         slot.group.object3D.visible = true;
         slot.indicator.visible = false;
         this._place(slot, travelled);
