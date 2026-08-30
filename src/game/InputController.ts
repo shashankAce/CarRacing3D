@@ -6,6 +6,7 @@ const RIGHT_KEYS = ['ArrowRight', 'KeyD'];
 const GAS_KEYS = ['ArrowUp', 'KeyW'];
 const BRAKE_KEYS = ['ArrowDown', 'KeyS'];
 const TAP_KEYS = ['Space', 'Enter'];
+const PAUSE_KEYS = ['Escape', 'KeyP'];
 
 /**
  * InputController — collapses keyboard and the virtual joystick into two axes.
@@ -37,6 +38,8 @@ export class InputController {
     private _ignoredTapTargets = new Set<Node>();
     /** A press that hasn't been consumed yet — drives the restart prompt. */
     private _tapPending = false;
+    private _pausePending = false;
+    private _pauseKeyHeld = false;
 
     constructor(controls: TouchControls) {
         this._controls = controls;
@@ -66,6 +69,13 @@ export class InputController {
         return tapped;
     }
 
+    /** One-shot pause toggle from Escape/P; held keys never repeat the action. */
+    consumePause(): boolean {
+        const requested = this._pausePending;
+        this._pausePending = false;
+        return requested;
+    }
+
     ignoreTapTarget(node: Node): void {
         this._ignoredTapTargets.add(node);
     }
@@ -84,6 +94,9 @@ export class InputController {
     /** Call once per frame, before anything reads `axis` or `throttle`. */
     sample(): void {
         if (TAP_KEYS.some(k => inputListener.isKeyDown(k))) this._tapPending = true;
+        const pauseHeld = PAUSE_KEYS.some(k => inputListener.isKeyDown(k));
+        if (pauseHeld && !this._pauseKeyHeld) this._pausePending = true;
+        this._pauseKeyHeld = pauseHeld;
 
         // Keyboard wins while a key is held; otherwise the joystick. They're
         // rarely both present, and this keeps a stuck touch from fighting the

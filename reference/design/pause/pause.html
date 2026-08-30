@@ -1,0 +1,200 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Pause Screen</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700&amp;family=Montserrat:ital,wght@0,800;0,900;1,800&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary": "#accfb1",
+                        "surface-bright": "#393939",
+                        "outline-variant": "#564334",
+                        "surface-dim": "#131313",
+                        "tertiary-container": "#87abe5",
+                        "tertiary-fixed-dim": "#a7c8ff",
+                        "on-secondary-fixed": "#02210e",
+                        "inverse-on-surface": "#303030",
+                        "on-error-container": "#ffdad6",
+                        "error-container": "#93000a",
+                        "surface-tint": "#ffb77d",
+                        "primary": "#ffb77d",
+                        "surface-container-high": "#2a2a2a",
+                        "on-secondary-fixed-variant": "#2e4d36",
+                        "surface-variant": "#353535",
+                        "error": "#ffb4ab",
+                        "on-surface": "#e5e2e1",
+                        "surface": "#131313",
+                        "on-secondary-container": "#9bbea0",
+                        "primary-fixed-dim": "#ffb77d",
+                        "on-tertiary-fixed": "#001c3b",
+                        "on-primary-fixed-variant": "#6e3900",
+                        "on-surface-variant": "#ddc1ae",
+                        "on-tertiary": "#003060",
+                        "primary-fixed": "#ffdcc3",
+                        "on-primary-fixed": "#2f1500",
+                        "secondary-fixed-dim": "#accfb1",
+                        "on-tertiary-fixed-variant": "#1e477b",
+                        "on-background": "#e5e2e1",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-container": "#ff8c00",
+                        "surface-container-highest": "#353535",
+                        "secondary-container": "#2e4d36",
+                        "tertiary": "#a7c8ff",
+                        "on-error": "#690005",
+                        "on-primary": "#4d2600",
+                        "surface-container-low": "#1b1c1c",
+                        "background": "#131313",
+                        "tertiary-fixed": "#d5e3ff",
+                        "outline": "#a48c7a",
+                        "secondary-fixed": "#c7eccc",
+                        "surface-container": "#1f2020",
+                        "inverse-primary": "#904d00",
+                        "on-tertiary-container": "#123f72",
+                        "on-secondary": "#183721",
+                        "on-primary-container": "#623200",
+                        "inverse-surface": "#e5e2e1"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "hud-padding": "32px",
+                        "safe-margin": "24px",
+                        "unit": "8px",
+                        "gutter": "16px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Montserrat"],
+                        "display-hero": ["Montserrat"],
+                        "body-md": ["Inter"],
+                        "stat-number": ["Montserrat"],
+                        "headline-lg": ["Montserrat"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["28px", { "lineHeight": "34px", "fontWeight": "800" }],
+                        "display-hero": ["72px", { "lineHeight": "80px", "letterSpacing": "-0.04em", "fontWeight": "900" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "500" }],
+                        "stat-number": ["48px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "900" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "800" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Modal Shadow mimicking 3D environment depth */
+        .modal-shadow {
+            box-shadow: 0 16px 32px rgba(27, 48, 34, 0.4), 0 4px 8px rgba(0, 0, 0, 0.5);
+        }
+        
+        /* Physical Button Effects */
+        .btn-primary {
+            border-bottom-width: 4px;
+            border-color: #c96b00; /* Darker sunset orange */
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+        
+        .btn-primary:active {
+            transform: translateY(4px);
+            border-bottom-width: 0px;
+            margin-bottom: 4px;
+        }
+
+        .btn-secondary {
+            border-bottom-width: 4px;
+            border-color: #1a3321; /* Darker forest green */
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        
+        .btn-secondary:active {
+            transform: translateY(4px);
+            border-bottom-width: 0px;
+            margin-bottom: 4px;
+        }
+        
+        /* Glassmorphism Surface for Modal */
+        .glass-surface {
+            background: linear-gradient(180deg, rgba(42, 42, 42, 0.85) 0%, rgba(19, 19, 19, 0.95) 100%);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(135, 171, 229, 0.15); /* Muted blue border accent */
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface w-full h-screen overflow-hidden flex items-center justify-center relative">
+<!-- Gameplay Background Simulation -->
+<div class="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat" data-alt="A cinematic, low-poly 3D racing game environment showing a high-speed vehicle on a canyon track at sunset. The scene uses deep blacks, warm sunset orange, and muted blues. The lighting is dramatic and atmospheric, characteristic of modern mobile arcade racers." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuADuBAkPd5h0mtY24buAZ4oYo_0sF93c8pyXy1uNesxFhASKcdUpb5EKwH4cCc325VnvqJJOamrBBRIAlI9qUnvOE2nE20PnAA7pOOOm7iJTxRes6pCdQkvSVeYv9yOEx8FkYR4D1OrBIOP2PjE5Op7ftQUYLd1CNTWIKUMODP8CcRvWBmN8r3fCXbNn87NQMdoxHUghP3aMuKm4hwT_fkXcjHMbHNnvWOfHX2WRsrzIRa63m-LRwxneg')">
+<!-- HUD Elements (Blurred out by overlay) -->
+<div class="absolute top-0 left-0 w-full px-hud-padding pt-safe-margin flex justify-between opacity-30">
+<div class="w-16 h-16 rounded-full border-4 border-surface-variant flex items-center justify-center">
+<span class="text-stat-number font-stat-number">84</span>
+</div>
+<div class="flex flex-col items-end">
+<span class="text-label-caps font-label-caps text-on-surface-variant">SCORE</span>
+<span class="text-headline-lg-mobile font-headline-lg-mobile">12,450</span>
+</div>
+</div>
+</div>
+<!-- Blur Overlay -->
+<div class="absolute inset-0 z-10 bg-surface/60 backdrop-blur-md"></div>
+<!-- Center-Anchored Modal -->
+<main class="z-20 w-full max-w-[400px] px-[48px] flex flex-col items-center">
+<!-- Pause Panel -->
+<div class="glass-surface modal-shadow rounded-xl w-full p-6 flex flex-col items-center">
+<!-- Header -->
+<div class="mb-8 flex flex-col items-center">
+<span class="material-symbols-outlined text-[48px] text-on-surface-variant mb-2">pause_circle</span>
+<h1 class="text-headline-lg-mobile font-headline-lg-mobile tracking-wider text-on-surface">PAUSED</h1>
+</div>
+<!-- Action Stack -->
+<div class="flex flex-col w-full space-y-4">
+<!-- Resume Button (Primary) -->
+<button class="btn-primary w-full bg-primary-container text-[#111111] rounded-lg py-4 px-6 flex justify-center items-center gap-2 transition-transform duration-100 hover:brightness-110">
+<span class="material-symbols-outlined text-[20px]">play_arrow</span>
+<span class="text-label-caps font-label-caps text-sm">RESUME</span>
+</button>
+<!-- Restart Button (Secondary) -->
+<button class="btn-secondary w-full bg-secondary-container text-on-surface rounded-lg py-4 px-6 flex justify-center items-center gap-2 transition-transform duration-100 hover:brightness-110">
+<span class="material-symbols-outlined text-[20px]">refresh</span>
+<span class="text-label-caps font-label-caps text-sm">RESTART</span>
+</button>
+<!-- Settings Button (Secondary) -->
+<button class="btn-secondary w-full bg-surface-variant text-on-surface rounded-lg py-4 px-6 flex justify-center items-center gap-2 transition-transform duration-100 hover:brightness-110 border-b-[#1f1f1f]">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span class="text-label-caps font-label-caps text-sm">SETTINGS</span>
+</button>
+</div>
+<!-- Main Menu Text Link -->
+<div class="mt-8">
+<a class="text-label-caps font-label-caps text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 group" href="#">
+<span class="material-symbols-outlined text-[16px] group-hover:-translate-x-1 transition-transform">logout</span>
+                    MAIN MENU
+                </a>
+</div>
+</div>
+</main>
+<script>
+        // Simple micro-interaction for button press sounds or haptics could go here
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('mousedown', () => {
+                // Simulate physical press logic if needed beyond CSS
+            });
+        });
+    </script>
+</body></html>

@@ -1,4 +1,4 @@
-import { ColorRect, Label, Node, Scene } from 'noonengine';
+import { ColorRect, Graphics, Label, Node, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 export type LoadingStage = 'assets' | 'compile' | 'world' | 'shadows';
@@ -10,8 +10,10 @@ export class LoadingScreen {
     private _track: Node;
     private _fill: Node;
     private _title: Label;
+    private _subtitle: Label;
     private _status: Label;
     private _percent: Label;
+    private _decorations: Node[] = [];
     private _visible = true;
 
     constructor(scene: Scene) {
@@ -25,10 +27,29 @@ export class LoadingScreen {
         this._backdrop.addComponent(ColorRect).color = c.backdropColor;
         scene.addChild(this._backdrop);
 
-        this._title = this._makeLabel(scene, cx, c.titleY, c.titleFontSize, c.titleColor);
+        // This stays fully procedural and engine-native: the boot screen gets
+        // a polished identity without adding a font or image download to the
+        // startup path.
+        const accent = new Node(cx, c.titleY + 66);
+        accent.width = 112;
+        accent.height = 5;
+        accent.addComponent(ColorRect).color = c.accentColor;
+        scene.addChild(accent);
+        this._decorations.push(accent);
+
+        const cardNode = new Node(cx, c.cardY);
+        const card = cardNode.addComponent(Graphics);
+        card.setStroke(c.cardStroke, 2);
+        card.drawRoundedRectangle(c.cardWidth, c.cardHeight, c.cardRadius, c.cardColor);
+        scene.addChild(cardNode);
+        this._decorations.push(cardNode);
+
+        this._title = this._makeLabel(scene, cx, c.titleY, c.titleFontSize, c.titleColor, 900);
         this._title.text = c.title;
-        this._status = this._makeLabel(scene, cx, c.statusY, c.statusFontSize, c.statusColor);
-        this._percent = this._makeLabel(scene, cx, c.percentY, c.percentFontSize, c.percentColor);
+        this._subtitle = this._makeLabel(scene, cx, c.subtitleY, c.subtitleFontSize, c.subtitleColor, 700);
+        this._subtitle.text = c.subtitle;
+        this._status = this._makeLabel(scene, cx, c.statusY, c.statusFontSize, c.statusColor, 700);
+        this._percent = this._makeLabel(scene, cx, c.percentY, c.percentFontSize, c.percentColor, 900);
 
         this._track = new Node(cx, c.barY);
         this._track.width = c.barWidth;
@@ -72,14 +93,18 @@ export class LoadingScreen {
         this._track.active = false;
         this._fill.active = false;
         this._title.node.active = false;
+        this._subtitle.node.active = false;
         this._status.node.active = false;
         this._percent.node.active = false;
+        for (const node of this._decorations) node.active = false;
     }
 
-    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string): Label {
+    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string, weight: number): Label {
         const node = new Node(x, y);
         const label = node.addComponent(Label);
         label.fontSize = fontSize;
+        label.fontFamily = cfg.loading.fontFamily;
+        label.fontWeight = weight;
         label.color = color;
         label.textAlign = Label.TextAlign.CENTER;
         scene.addChild(node);

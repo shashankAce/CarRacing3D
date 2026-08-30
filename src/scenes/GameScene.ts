@@ -18,6 +18,8 @@ import { TouchControls } from '../ui/TouchControls';
 import { Hud } from '../ui/Hud';
 import { PerfHud } from '../ui/PerfHud';
 import { GameOverPanel } from '../ui/GameOverPanel';
+import { PausePanel } from '../ui/PausePanel';
+import { PauseButton } from '../ui/PauseButton';
 import { CarSelectPanel } from '../ui/CarSelectPanel';
 import { CarShowroom } from '../ui/CarShowroom';
 import { LoadingScreen, type LoadingStage } from '../ui/LoadingScreen';
@@ -73,6 +75,8 @@ export class GameScene extends Scene {
     private _traffic: TrafficSystem;
     private _hud: Hud;
     private _gameOver: GameOverPanel;
+    private _pausePanel: PausePanel;
+    private _pauseButton: PauseButton;
     private _carSelect: CarSelectPanel | null = null;
     private _showroom: CarShowroom | null = null;
     private _loading: LoadingScreen;
@@ -82,6 +86,8 @@ export class GameScene extends Scene {
     private _vehicleModels: VehicleModels;
     private _vehiclesReady = false;
     private _selectingCar = true;
+    private _paused = false;
+    private _selectedVehicleId: VehicleModelId | null = null;
     private _discardSelectionTap = false;
     private _perf: PerfHud | null = null;
     private _sun: DirectionalLight3D;
@@ -197,7 +203,7 @@ export class GameScene extends Scene {
         }
         this._hud = new Hud(this);
         this._hud.setVisible(false);
-        this._gameOver = new GameOverPanel(this);
+        this._gameOver = new GameOverPanel(this, () => this._restart());
         this._vehicleModels = new VehicleModels();
         if (cfg.carSelect.enabled) {
             this._showroom = new CarShowroom(sys, this._vehicleModels);
@@ -214,6 +220,17 @@ export class GameScene extends Scene {
         this._environmentToggle.setVisible(false);
         this._fullscreenButton = new FullscreenButton(this);
         this._input.ignoreTapTarget(this._fullscreenButton.node);
+        this._pausePanel = new PausePanel(
+            this,
+            () => this._resumeRun(),
+            () => { this._resumeRun(); this._restart(); },
+            () => this._returnToCarSelect(),
+        );
+        this._pauseButton = new PauseButton(this, () => this._pauseRun());
+        this._pauseButton.setVisible(false);
+        this._input.ignoreTapTarget(this._pauseButton.node);
+        for (const node of this._pausePanel.interactiveNodes) this._input.ignoreTapTarget(node);
+        for (const node of this._gameOver.interactiveNodes) this._input.ignoreTapTarget(node);
         this._loading = new LoadingScreen(this);
         this._setLoadingProgress('assets', 0);
         if (cfg.debug.showPerf) {
@@ -300,9 +317,18 @@ export class GameScene extends Scene {
         }
 
         this._input.sample();
+        if (this._input.consumePause()) {
+            if (this._paused) this._resumeRun();
+            else if (this._state.isRunning) this._pauseRun();
+        }
         if (this._discardSelectionTap) {
             this._input.consumeTap();
             this._discardSelectionTap = false;
+        }
+
+        if (this._paused) {
+            this._perf?.update(dt);
+            return;
         }
 
         if (this._state.isRunning) {
@@ -413,6 +439,10 @@ export class GameScene extends Scene {
 
     private _endRun(title: string): void {
         this._state.end();
+        this._controls.setEnabled(false);
+        this._hud.setVisible(false);
+        this._environmentToggle.setVisible(false);
+        this._pauseButton.setVisible(false);
         this._gameOver.show(
             title,
             this._state.distance,
@@ -424,7 +454,13 @@ export class GameScene extends Scene {
     }
 
     private _restart(): void {
+        this._paused = false;
+        this._pausePanel?.hide();
         this._gameOver.hide();
+        this._controls.setEnabled(true);
+        this._hud.setVisible(true);
+        this._environmentToggle.setVisible(true);
+        this._pauseButton.setVisible(true);
         this._state.reset();
         setEnvironmentPosition(this._state.scroll.travelled);
         this._refreshEnvironmentSky(true);
@@ -549,6 +585,7 @@ export class GameScene extends Scene {
         if (!this._vehiclesReady || !this._selectingCar) return;
 
         this._state.setVehicleSpeedProfile(this._vehicleModels.spec(id).speed);
+        this._selectedVehicleId = id;
         this._car.setVisual(this._vehicleModels.create(id));
         this._car.refreshProjectedGeometry(this._projected);
         this._projected.rebake();
@@ -560,9 +597,47 @@ export class GameScene extends Scene {
         this._controls.setEnabled(true);
         this._hud.setVisible(true);
         this._environmentToggle.setVisible(true);
+        this._pauseButton.setVisible(true);
         // The selection tap is also seen by InputController's global listener;
         // consume it so it cannot trigger an accidental restart later.
         this._restart();
+    }
+
+    /** Leaves a paused run for the already-constructed showroom, without rebuilding assets. */
+    private _returnToCarSelect(): void {
+        if (!cfg.carSelect.enabled || !this._selectedVehicleId) return;
+        this._pausePanel.hide();
+        this._paused = false;
+        this._controls.setEnabled(false);
+        this._hud.setVisible(false);
+        this._environmentToggle.setVisible(false);
+        this._pauseButton.setVisible(false);
+        this._input.clearHold();
+        this._selectingCar = true;
+        this._showroom?.show(this._selectedVehicleId);
+        this._carSelect?.show(this._selectedVehicleId);
+    }
+
+    private _pauseRun(): void {
+        if (this._paused || !this._state.isRunning || this._selectingCar) return;
+        this._paused = true;
+        this._controls.setEnabled(false);
+        this._hud.setVisible(false);
+        this._environmentToggle.setVisible(false);
+        this._pauseButton.setVisible(false);
+        this._input.clearHold();
+        this._pausePanel.show();
+    }
+
+    private _resumeRun(): void {
+        if (!this._paused) return;
+        this._paused = false;
+        this._pausePanel.hide();
+        this._controls.setEnabled(true);
+        this._hud.setVisible(true);
+        this._environmentToggle.setVisible(true);
+        this._pauseButton.setVisible(true);
+        this._input.clearHold();
     }
 
     private _attachTrafficMaterials(): void {
