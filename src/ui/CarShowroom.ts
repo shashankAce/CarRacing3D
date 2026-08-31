@@ -94,6 +94,7 @@ export class CarShowroom {
         this._turntable.rotation.y = c.initialRotation;
         this._root.add(this._turntable);
         this._buildRoom();
+        // this._buildCeilingLights();
         this._buildTurntable();
         this._buildLights();
         this._root.traverse((object) => object.layers.set(c.layer));
@@ -320,6 +321,7 @@ export class CarShowroom {
 
     private _buildRoom(): void {
         const p = cfg.carSelect.showroom.platform;
+        const ceiling = cfg.carSelect.showroom.ceiling;
 
         const floorGeometry = new THREE.CircleGeometry(12, 64);
         floorGeometry.rotateX(-Math.PI / 2);
@@ -333,7 +335,14 @@ export class CarShowroom {
         floor.receiveShadow = true;
         this._root.add(floor);
 
-        const wallGeometry = new THREE.CylinderGeometry(11.8, 11.8, 8, 64, 1, true);
+        const wallGeometry = new THREE.CylinderGeometry(
+            11.8,
+            11.8,
+            ceiling.height,
+            64,
+            1,
+            true,
+        );
         const wallMaterial = new THREE.MeshStandardMaterial({
             color: p.wallColor,
             roughness: 0.9,
@@ -341,13 +350,89 @@ export class CarShowroom {
             side: THREE.BackSide,
         });
         const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-        wall.position.y = 4;
+        wall.position.y = ceiling.height * 0.5;
         wall.receiveShadow = true;
         this._root.add(wall);
 
-        this._ownedGeometries.push(floorGeometry, wallGeometry);
-        this._ownedMaterials.push(floorMaterial, wallMaterial);
+        const ceilingGeometry = new THREE.CircleGeometry(11.8, 64);
+        ceilingGeometry.rotateX(Math.PI / 2);
+        const ceilingMaterial = new THREE.MeshStandardMaterial({
+            color: ceiling.color,
+            roughness: ceiling.roughness,
+            metalness: ceiling.metalness,
+        });
+        const ceilingMesh = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+        ceilingMesh.position.y = ceiling.height;
+        ceilingMesh.receiveShadow = true;
+        this._root.add(ceilingMesh);
+
+        this._ownedGeometries.push(floorGeometry, wallGeometry, ceilingGeometry);
+        this._ownedMaterials.push(floorMaterial, wallMaterial, ceilingMaterial);
     }
+
+    /*
+    private _buildCeilingLights(): void {
+        const c = cfg.carSelect.showroom.ceiling;
+        const fixture = new THREE.Group();
+        fixture.rotation.set(c.rotation.x, c.rotation.y, c.rotation.z);
+        this._root.add(fixture);
+
+        const hexWidth = Math.sqrt(3) * c.hexRadius;
+        const rowZ = [-c.hexRadius * 1.5, 0, c.hexRadius * 1.5];
+        const centers = [
+            ...[-hexWidth, 0, hexWidth].map((x) => new THREE.Vector2(x, rowZ[0])),
+            ...[-hexWidth * 0.5, hexWidth * 0.5].map((x) => new THREE.Vector2(x, rowZ[1])),
+            ...[-hexWidth, 0, hexWidth].map((x) => new THREE.Vector2(x, rowZ[2])),
+        ];
+
+        const tubeGeometry = new THREE.CylinderGeometry(
+            c.tubeRadius,
+            c.tubeRadius,
+            1,
+            10,
+        );
+        const tubeMaterial = new THREE.MeshBasicMaterial({
+            color: c.lightColor,
+            toneMapped: false,
+        });
+        const up = new THREE.Vector3(0, 1, 0);
+        const edges = new Map<string, [THREE.Vector3, THREE.Vector3]>();
+
+        // Build a tiled 3-2-3 honeycomb and merge coincident borders so the
+        // shared edges stay the same brightness as the outside edges.
+        for (const center of centers) {
+            const vertices: THREE.Vector3[] = [];
+            for (let i = 0; i < 6; i++) {
+                const angle = Math.PI / 6 + i * Math.PI / 3;
+                vertices.push(new THREE.Vector3(
+                    center.x + Math.cos(angle) * c.hexRadius,
+                    c.lightHeight,
+                    center.y + Math.sin(angle) * c.hexRadius,
+                ));
+            }
+            for (let i = 0; i < 6; i++) {
+                const from = vertices[i];
+                const to = vertices[(i + 1) % 6];
+                const fromKey = `${from.x.toFixed(4)},${from.z.toFixed(4)}`;
+                const toKey = `${to.x.toFixed(4)},${to.z.toFixed(4)}`;
+                const key = fromKey < toKey ? `${fromKey}|${toKey}` : `${toKey}|${fromKey}`;
+                if (!edges.has(key)) edges.set(key, [from, to]);
+            }
+        }
+
+        for (const [from, to] of edges.values()) {
+            const direction = to.clone().sub(from);
+            const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            tube.position.copy(from).add(to).multiplyScalar(0.5);
+            tube.quaternion.setFromUnitVectors(up, direction.clone().normalize());
+            tube.scale.y = direction.length();
+            fixture.add(tube);
+        }
+
+        this._ownedGeometries.push(tubeGeometry);
+        this._ownedMaterials.push(tubeMaterial);
+    }
+    */
 
     private _buildTurntable(): void {
         const p = cfg.carSelect.showroom.platform;

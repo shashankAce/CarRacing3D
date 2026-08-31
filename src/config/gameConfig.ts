@@ -967,6 +967,19 @@ export const gameConfig = {
                 floorColor: 0x070b10,
                 wallColor: 0x09131e,
             },
+            ceiling: {
+                height: 12,
+                color: 0x05090d,
+                roughness: 0.88,
+                metalness: 0.08,
+                /* Honeycomb fixture settings (currently disabled).
+                lightHeight: 6.06,
+                lightColor: 0xf4fbff,
+                hexRadius: 1.55,
+                tubeRadius: 0.045,
+                rotation: { x: 0, y: 0, z: 0 },
+                */
+            },
             transition: {
                 duration: 0.55,
                 slideDistance: 4.8,
@@ -976,7 +989,7 @@ export const gameConfig = {
             spotlightCoveragePadding: 1.08,
             spotlightMaxAngle: 1.15,
             spotlights: [
-                { color: 0xffffff, intensity: 330, distance: 28, angle: 0.48, penumbra: 0.62, position: { x: -4.8, y: 7.2, z: 5.0 } },
+                { color: 0xffffff, intensity: 330, distance: 28, angle: 0.48, penumbra: 0.62, position: { x: -4.8, y: 5.8, z: 5.0 } },
                 { color: 0x66cfff, intensity: 250, distance: 25, angle: 0.50, penumbra: 0.72, position: { x: 5.5, y: 5.4, z: 2.2 } },
                 { color: 0xb26cff, intensity: 300, distance: 24, angle: 0.44, penumbra: 0.68, position: { x: 0.4, y: 4.8, z: -5.3 } },
             ],
@@ -988,8 +1001,8 @@ export const gameConfig = {
     loading: {
         title: 'FAST LANE',
         subtitle: 'ENDLESS RACING ADVENTURE',
-        titleY: 867,
-        subtitleY: 809,
+        titleY: 867+150,
+        subtitleY: 809+150,
         statusY: 447,
         percentY: 374,
         barY: 407,
@@ -1013,7 +1026,7 @@ export const gameConfig = {
         trackColor: '#353535',
         fillColor: '#ff8c00',
         accentColor: '#ffb77d',
-        fontFamily: 'Arial, sans-serif',
+        fontFamily: 'MonsterRacing',
         errorText: 'UNABLE TO LOAD VEHICLES',
         stages: {
             assets: 'LOADING ASSETS',

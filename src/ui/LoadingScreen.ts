@@ -1,4 +1,4 @@
-import { ColorRect, Graphics, Label, Node, Scene } from 'noonengine';
+import { assetCache, BitmapText, ColorRect, Graphics, Label, Node, Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 export type LoadingStage = 'assets' | 'compile' | 'world' | 'shadows';
@@ -9,8 +9,8 @@ export class LoadingScreen {
     private _backdrop: Node;
     private _track: Node;
     private _fill: Node;
-    private _title: Label;
-    private _subtitle: Label;
+    private _title: BitmapText;
+    private _subtitle: BitmapText;
     private _status: Label;
     private _percent: Label;
     private _decorations: Node[] = [];
@@ -27,16 +27,6 @@ export class LoadingScreen {
         this._backdrop.addComponent(ColorRect).color = c.backdropColor;
         scene.addChild(this._backdrop);
 
-        // This stays fully procedural and engine-native: the boot screen gets
-        // a polished identity without adding a font or image download to the
-        // startup path.
-        const accent = new Node(cx, c.titleY + 66);
-        accent.width = 112;
-        accent.height = 5;
-        accent.addComponent(ColorRect).color = c.accentColor;
-        scene.addChild(accent);
-        this._decorations.push(accent);
-
         const cardNode = new Node(cx, c.cardY);
         const card = cardNode.addComponent(Graphics);
         card.setStroke(c.cardStroke, 2);
@@ -44,12 +34,14 @@ export class LoadingScreen {
         scene.addChild(cardNode);
         this._decorations.push(cardNode);
 
-        this._title = this._makeLabel(scene, cx, c.titleY, c.titleFontSize, c.titleColor, 900);
+        this._title = this._makeLabel(scene, cx, c.titleY, c.titleFontSize, c.titleColor);
         this._title.text = c.title;
-        this._subtitle = this._makeLabel(scene, cx, c.subtitleY, c.subtitleFontSize, c.subtitleColor, 700);
+
+        this._subtitle = this._makeLabel(scene, cx, c.subtitleY, c.subtitleFontSize, c.subtitleColor);
         this._subtitle.text = c.subtitle;
-        this._status = this._makeLabel(scene, cx, c.statusY, c.statusFontSize, c.statusColor, 700);
-        this._percent = this._makeLabel(scene, cx, c.percentY, c.percentFontSize, c.percentColor, 900);
+
+        this._status = this._makeLabelTTF(scene, cx, c.statusY, c.statusFontSize, c.statusColor);
+        this._percent = this._makeLabelTTF(scene, cx, c.percentY, c.percentFontSize, c.percentColor);
 
         this._track = new Node(cx, c.barY);
         this._track.width = c.barWidth;
@@ -66,6 +58,7 @@ export class LoadingScreen {
         scene.addChild(this._fill);
 
         this.setProgress('assets', 0, 0);
+        void this._loadBitmapFont();
     }
 
     setProgress(stage: LoadingStage, stageProgress: number, overallProgress: number): void {
@@ -99,14 +92,38 @@ export class LoadingScreen {
         for (const node of this._decorations) node.active = false;
     }
 
-    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string, weight: number): Label {
+    private async _loadBitmapFont(): Promise<void> {
+        await assetCache.preloadAssets([
+            // Kept explicit so production asset trimming retains the atlas page
+            // referenced by the BMFont descriptor.
+            { src: 'res/MonsterRacing.png', type: 'image' },
+        ]);
+        await assetCache.preloadAssets([
+            { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
+        ]);
+
+        // BitmapText may have performed its first layout before the atlas was
+        // available. Re-layout once the font is in the cache.
+        for (const text of [this._title, this._subtitle, this._status, this._percent]) text.markDirty();
+    }
+
+    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string): BitmapText {
+        const node = new Node(x, y);
+        const label = node.addComponent(BitmapText);
+        label.fontSize = fontSize;
+        label.fontFamily = cfg.loading.fontFamily;
+        label.color = color;
+        label.textAlign = 'center';
+        scene.addChild(node);
+        return label;
+    }
+    private _makeLabelTTF(scene: Scene, x: number, y: number, fontSize: number, color: string): Label {
         const node = new Node(x, y);
         const label = node.addComponent(Label);
         label.fontSize = fontSize;
-        label.fontFamily = cfg.loading.fontFamily;
-        label.fontWeight = weight;
+        label.fontFamily = 'Arial, sans-serif';
         label.color = color;
-        label.textAlign = Label.TextAlign.CENTER;
+        label.textAlign = 'center';
         scene.addChild(node);
         return label;
     }
