@@ -1,4 +1,4 @@
-import { ColorRect, Graphics, Input, Label, Node, Scene, Widget, inputListener } from 'noonengine';
+import { BitmapText, ColorRect, Graphics, Input, Label, Node, Scene, Widget, inputListener } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { VehicleModelId } from '../assets/VehicleModels';
 
@@ -37,12 +37,12 @@ export class CarSelectPanel {
         this._root.name = 'CarShowroomUI';
         scene.addChild(this._root);
 
-        const eyebrow = this._makeLabel(cx, c.eyebrowY, c.eyebrowFontSize, c.eyebrowColor);
-        eyebrow.fontWeight = 700;
-        eyebrow.text = c.eyebrow;
+        // const eyebrow = this._makeLabel(cx, c.eyebrowY, c.eyebrowFontSize, c.eyebrowColor);
+        // eyebrow.fontWeight = 700;
+        // eyebrow.text = c.eyebrow;
 
-        const title = this._makeLabel(cx, c.titleY, c.titleFontSize, c.titleColor);
-        title.fontWeight = 800;
+        const title = this._makeLabelBitmap(cx, c.titleY, c.titleFontSize, c.titleColor);
+        // title.fontWeight = 800;
         title.text = c.title;
 
         this._name = this._makeLabel(cx, c.carNameY, c.carNameFontSize, c.titleColor, true);
@@ -257,6 +257,17 @@ export class CarSelectPanel {
             row.fill.width = c.statBarWidth * Math.min(1, Math.max(0, value / row.maximum));
             row.value.text = row.format(value);
         }
+    }
+
+    private _makeLabelBitmap(x: number, y: number, fontSize: number, color: string): BitmapText {
+        const node = new Node(x, y);
+        const label = node.addComponent(BitmapText);
+        label.fontSize = fontSize;
+        label.fontFamily = cfg.loading.fontFamily;
+        label.color = color;
+        label.textAlign = 'center';
+        this._root.addChild(node);
+        return label;
     }
 
     private _makeLabel(

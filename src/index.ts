@@ -39,7 +39,7 @@ const engine = new GameEngine({
     // Caps devicePixelRatio rather than following it. See ARCHITECTURE.md §2.4.
     pixelRatio: cfg.render.pixelRatioCap,
     resolutionScale: cfg.render.resolutionScale,
-    showStats: true,
+    showStats: false,
 });
 
 engine.setDesignResolution(cfg.design.width, cfg.design.height, ResolutionPolicy.FIXED_HEIGHT);

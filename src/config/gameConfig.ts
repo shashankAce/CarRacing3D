@@ -872,7 +872,7 @@ export const gameConfig = {
      */
     carSelect: {
         enabled: true,
-        title: 'SELECT YOUR RIDE',
+        title: 'SELECT YOUR\nRIDE',
         eyebrow: 'PRIVATE SHOWROOM',
         loadingText: 'LOADING CARS…',
         driveText: 'DRIVE THIS CAR',
