@@ -287,7 +287,8 @@ export class CarShowroom {
             requiredHalfHeight / Math.max(halfFovTangent, 0.0001),
         );
         this._targetLookY = cfg.carSelect.showroom.platform.topY
-            + dimensions.height * c.vehicleCenterHeightFactor;
+            + dimensions.height * c.vehicleCenterHeightFactor
+            + c.compositionOffsetY;
         this._lastFitAspect = this._camera.aspect;
     }
 

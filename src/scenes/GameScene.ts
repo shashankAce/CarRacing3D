@@ -301,17 +301,18 @@ export class GameScene extends Scene {
      */
     update(dt: number): void {
         if (this._startupStage) {
-            // this._advanceStartup();
-            // this._camera.update(dt, this._car, 0);
-            // this._updateSun();
-            // this._sky.update(this._camera.position);
-            // this._clouds.update(dt, this._camera.position);
+            this._advanceStartup();
+            this._camera.update(dt, this._car, 0);
+            this._updateSun();
+            this._sky.update(this._camera.position);
+            this._clouds.update(dt, this._camera.position);
             return;
         }
 
         if (this._selectingCar) {
             // The showroom owns a separate camera layer and its own lights;
             // gameplay sky/world/sun are deliberately not updated or rendered.
+            this._carSelect?.update();
             this._showroom?.update(dt);
             return;
         }
@@ -484,7 +485,10 @@ export class GameScene extends Scene {
     /** Load all static model templates once, then allocate every traffic clone up front. */
     private async _loadVehicleModels(): Promise<void> {
         try {
-            await this._vehicleModels.load((stage, progress) => this._setLoadingProgress(stage, progress));
+            await Promise.all([
+                this._vehicleModels.load((stage, progress) => this._setLoadingProgress(stage, progress)),
+                this._carSelect?.loadAssets(),
+            ]);
             this._traffic.attachModels(this._vehicleModels);
             this._traffic.refreshProjectedGeometry(this._projected);
             this._attachTrafficMaterials();
@@ -492,7 +496,7 @@ export class GameScene extends Scene {
             this._modelsReady = true;
             this._setLoadingProgress('world', 0);
         } catch (error) {
-            console.error('[vehicles] Failed to load the vehicle catalog.', error);
+            console.error('[startup] Failed to load vehicle or car-select UI assets.', error);
             this._startupStage = null;
             this._loading.showError();
         }

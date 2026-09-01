@@ -1,29 +1,57 @@
-import { BitmapText, ColorRect, Graphics, Input, Label, Node, Scene, Widget, inputListener } from 'noonengine';
+import {
+    BitmapText,
+    ColorRect,
+    Input,
+    Label,
+    Node,
+    Scene,
+    Sprite,
+    Widget,
+    assetCache,
+    inputListener,
+} from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { VehicleModelId } from '../assets/VehicleModels';
 
 type VehicleSpec = typeof cfg.vehicles.models[number];
 
+const CHEVRON_ALIAS = 'car-select:chevron';
+const STAT_ICON_ALIASES = [
+    'car-select:top-speed',
+    'car-select:acceleration',
+    'car-select:braking',
+] as const;
+
 interface StatRow {
     fill: Node;
+    track: Node;
+    valueNode: Node;
     value: Label;
     maximum: number;
     read: (spec: VehicleSpec) => number;
     format: (value: number) => string;
+    normalizedValue: number;
 }
 
-/** Showroom navigation and config-driven vehicle performance card. */
+/** Reference-matched showroom navigation and responsive performance readout. */
 export class CarSelectPanel {
 
     private readonly _root = new Node();
+    private readonly _statsContainer: Node;
+    private readonly _statsWidget: Widget;
     private readonly _name: Label;
     private readonly _description: Label;
     private readonly _stats: StatRow[] = [];
+    private readonly _statIcons: Sprite[] = [];
+    private readonly _arrowSprites: Sprite[] = [];
     private readonly _interactiveNodes: Node[] = [];
+    private readonly _driveButton: Node;
+    private _dragZone!: Node;
     private _index = 0;
     private _visible = false;
     private _dragPointerId: number | null = null;
     private _lastDragX = 0;
+    private _lastDesignWidth = -1;
 
     constructor(
         scene: Scene,
@@ -33,31 +61,51 @@ export class CarSelectPanel {
         private readonly _onDragState: (dragging: boolean) => void,
     ) {
         const c = cfg.carSelect;
-        const cx = cfg.design.width / 2;
         this._root.name = 'CarShowroomUI';
         scene.addChild(this._root);
 
-        // const eyebrow = this._makeLabel(cx, c.eyebrowY, c.eyebrowFontSize, c.eyebrowColor);
-        // eyebrow.fontWeight = 700;
-        // eyebrow.text = c.eyebrow;
+        this._makeHeader();
 
-        const title = this._makeLabelBitmap(cx, c.titleY, c.titleFontSize, c.titleColor);
-        // title.fontWeight = 800;
-        title.text = c.title;
+        this._statsContainer = new Node();
+        this._statsContainer.name = 'ResponsiveCarStats';
+        this._statsContainer.anchorX = 0;
+        this._statsContainer.anchorY = 1;
+        this._statsContainer.width = c.statsPanelWidth;
+        this._statsContainer.height = c.statsPanelHeight;
+        this._statsWidget = this._statsContainer.addComponent(Widget);
+        this._statsWidget.alignToWindow = true;
+        this._statsWidget.left = c.statsPanelLeft;
+        this._statsWidget.right = c.statsPanelRight;
+        this._statsWidget.top = c.statsPanelTop;
+        this._root.addChild(this._statsContainer);
 
-        this._name = this._makeLabel(cx, c.carNameY, c.carNameFontSize, c.titleColor, true);
+        this._makeNameAccent();
+        this._name = this._makeLabel(
+            this._statsContainer,
+            c.carNameX,
+            c.carNameY,
+            c.carNameFontSize,
+            c.titleColor,
+            true,
+            Label.TextAlign.LEFT,
+            0,
+        );
         this._name.fontWeight = 800;
-        this._description = this._makeLabel(cx, c.descriptionY, c.descriptionFontSize, c.descriptionColor, true);
+        this._description = this._makeLabel(
+            this._statsContainer,
+            c.descriptionX,
+            c.descriptionY,
+            c.descriptionFontSize,
+            c.descriptionColor,
+            true,
+            Label.TextAlign.LEFT,
+            0,
+        );
+        this._description.lineHeight = c.descriptionLineHeight;
 
         this._makeDragZone();
         this._makeArrow(-1);
         this._makeArrow(1);
-
-        const panelNode = new Node(cx, c.statsPanelY);
-        const panel = panelNode.addComponent(Graphics);
-        panel.tessellate = true;
-        panel.drawRoundedRectangle(c.statsPanelWidth, c.statsPanelHeight, 24, c.statsPanelColor);
-        this._root.addChild(panelNode);
 
         const statConfig = c.stats;
         this._stats.push(
@@ -69,13 +117,11 @@ export class CarSelectPanel {
                 (spec) => spec.speed.brake, (value) => `${value.toFixed(0)} M/S²`),
         );
 
-        this._makeDriveButton();
+        this._driveButton = this._makeDriveButton();
+        this._layoutResponsive(true);
         inputListener.on(Input.POINTER_MOVE, this._onDragMove, null, this);
         inputListener.on(Input.POINTER_UP, this._onDragRelease, null, this);
         inputListener.on(Input.POINTER_CANCEL, this._onDragRelease, null, this);
-        // NoonEngine emits DRAG_END for both a normal release and a native
-        // pointer-cancel. Listening here prevents mobile gestures from leaving
-        // the showroom permanently stuck in its manual-rotation state.
         inputListener.on(Input.DRAG_END, this._onDragRelease, null, this);
         this.setLoading();
     }
@@ -83,6 +129,21 @@ export class CarSelectPanel {
     get interactiveNodes(): readonly Node[] { return this._interactiveNodes; }
 
     get selectedId(): VehicleModelId { return cfg.vehicles.models[this._index].id; }
+
+    /** Loads only file-backed showroom UI art; procedural gradients need no preload. */
+    async loadAssets(): Promise<void> {
+        await assetCache.preloadAssets([
+            { src: 'res/right-chevron.png', type: 'image', alias: CHEVRON_ALIAS },
+            { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
+            { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
+            { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
+        ]);
+        const chevron = assetCache.getAsset(CHEVRON_ALIAS);
+        for (const sprite of this._arrowSprites) sprite.texture = chevron;
+        for (let i = 0; i < this._statIcons.length; i++) {
+            this._statIcons[i].texture = assetCache.getAsset(STAT_ICON_ALIASES[i]);
+        }
+    }
 
     setLoading(): void {
         this._visible = false;
@@ -94,7 +155,12 @@ export class CarSelectPanel {
         this._index = index >= 0 ? index : 0;
         this._visible = true;
         this._root.active = true;
+        this._layoutResponsive(true);
         this._refresh();
+    }
+
+    update(): void {
+        if (this._visible) this._layoutResponsive();
     }
 
     hide(): void {
@@ -111,6 +177,65 @@ export class CarSelectPanel {
         inputListener.off(Input.DRAG_END, this._onDragRelease, null);
     }
 
+    private _makeHeader(): void {
+        const c = cfg.carSelect;
+        const header = new Node(cfg.design.width * 0.5, cfg.design.height - c.headerHeight * 0.5);
+        header.name = 'SelectYourRideHeader';
+        header.width = cfg.design.width;
+        header.height = c.headerHeight;
+        const widget = header.addComponent(Widget);
+        widget.alignToWindow = true;
+        widget.left = 0;
+        widget.right = 0;
+        widget.top = 0;
+
+        const background = header.addComponent(Sprite);
+        background.sizeMode = Sprite.SizeMode.CUSTOM;
+        background.texture = this._makeGradientTexture(
+            c.headerGradientLeft,
+            c.headerGradientCenter,
+            c.headerGradientRight,
+        );
+        this._root.addChild(header);
+
+        const lowerEdge = new Node(0, -c.headerHeight * 0.5 + 1);
+        lowerEdge.width = cfg.design.width;
+        lowerEdge.height = 2;
+        lowerEdge.addComponent(ColorRect).color = c.headerEdgeColor;
+        const edgeWidget = lowerEdge.addComponent(Widget);
+        edgeWidget.left = 0;
+        edgeWidget.right = 0;
+        header.addChild(lowerEdge);
+
+        const title = this._makeBitmapLabel(
+            header,
+            c.titleMainX,
+            c.titleBaselineY,
+            c.titleFontSize,
+            c.titleColor,
+        );
+        title.text = c.title;
+        const accent = this._makeBitmapLabel(
+            header,
+            c.titleAccentX,
+            c.titleBaselineY,
+            c.titleFontSize,
+            c.titleAccentColor,
+        );
+        accent.text = c.titleAccent;
+    }
+
+    private _makeNameAccent(): void {
+        const c = cfg.carSelect;
+        const accentNode = new Node(c.carNameAccentX, c.carNameY);
+        const accent = accentNode.addComponent(ColorRect);
+        accent.color = c.titleAccentColor;
+        accentNode.width = c.carNameAccentWidth;
+        accentNode.height = c.carNameFontSize;
+        accentNode.rotation = c.carNameAccentRotation;
+        this._statsContainer.addChild(accentNode);
+    }
+
     private _makeDragZone(): void {
         const c = cfg.carSelect.showroom.drag;
         const node = new Node(cfg.design.width / 2, c.centerY);
@@ -120,6 +245,7 @@ export class CarSelectPanel {
         node.on(Input.POINTER_DOWN, this._onDragStart, this);
         this._root.addChild(node);
         this._interactiveNodes.push(node);
+        this._dragZone = node;
     }
 
     private _onDragStart(e: any): void {
@@ -137,8 +263,7 @@ export class CarSelectPanel {
     }
 
     private _onDragRelease(e: any): void {
-        if (this._dragPointerId === null) return;
-        if (e.pointer.id !== this._dragPointerId) return;
+        if (this._dragPointerId === null || e.pointer.id !== this._dragPointerId) return;
         this._dragPointerId = null;
         this._onDragState(false);
     }
@@ -154,20 +279,14 @@ export class CarSelectPanel {
         if (direction < 0) widget.left = c.arrowEdge;
         else widget.right = c.arrowEdge;
 
-        const backgroundNode = new Node();
-        const background = backgroundNode.addComponent(Graphics);
-        background.tessellate = true;
-        background.setStroke(c.arrowStroke, 3);
-        background.drawCircle(c.arrowSize * 0.5, c.arrowBackground);
-        node.addChild(backgroundNode);
-
-        const labelNode = new Node();
-        const label = labelNode.addComponent(Label);
-        label.fontSize = c.arrowFontSize;
-        label.fontWeight = 800;
-        label.color = c.arrowColor;
-        label.text = direction < 0 ? c.previousGlyph : c.nextGlyph;
-        node.addChild(labelNode);
+        const artNode = new Node();
+        artNode.width = c.arrowSize;
+        artNode.height = c.arrowSize;
+        artNode.scaleX = direction;
+        const art = artNode.addComponent(Sprite);
+        art.sizeMode = Sprite.SizeMode.CUSTOM;
+        node.addChild(artNode);
+        this._arrowSprites.push(art);
 
         node.on(Input.POINTER_DOWN, () => this._navigate(direction), this);
         this._root.addChild(node);
@@ -184,49 +303,82 @@ export class CarSelectPanel {
         const c = cfg.carSelect;
         const y = c.statsFirstY - index * c.statsGap;
 
-        const label = this._makeLabel(c.statLabelX, y, c.statFontSize, c.statLabelColor);
+        const iconNode = new Node(c.statIconX, y);
+        iconNode.width = c.statIconSize;
+        iconNode.height = c.statIconSize;
+        const icon = iconNode.addComponent(Sprite);
+        icon.sizeMode = Sprite.SizeMode.CUSTOM;
+        this._statsContainer.addChild(iconNode);
+        this._statIcons.push(icon);
+
+        const label = this._makeLabel(
+            this._statsContainer,
+            c.statLabelX,
+            y + c.statLabelOffsetY,
+            c.statFontSize,
+            c.statLabelColor,
+            false,
+            Label.TextAlign.LEFT,
+            0,
+        );
         label.fontWeight = 700;
         label.text = title;
 
-        const track = new Node(c.statBarX, y);
+        const track = new Node(c.statBarX, y + c.statBarOffsetY);
         track.anchorX = 0;
         track.width = c.statBarWidth;
         track.height = c.statBarHeight;
         track.addComponent(ColorRect).color = c.statTrackColor;
-        this._root.addChild(track);
+        this._statsContainer.addChild(track);
 
-        const fill = new Node(c.statBarX, y);
+        const fill = new Node(c.statBarX, y + c.statBarOffsetY);
         fill.anchorX = 0;
         fill.width = 0;
         fill.height = c.statBarHeight;
         fill.addComponent(ColorRect).color = c.statFillColor;
-        this._root.addChild(fill);
+        this._statsContainer.addChild(fill);
 
-        const value = this._makeLabel(c.statValueX, y, c.statValueFontSize, c.statValueColor, true);
+        const valueNode = new Node(c.statsPanelWidth, y + c.statBarOffsetY);
+        valueNode.anchorX = 1;
+        const value = valueNode.addComponent(Label);
+        value.fontSize = c.statValueFontSize;
+        value.color = c.statValueColor;
+        value.dynamic = true;
         value.fontWeight = 700;
-        return { fill, value, maximum, read, format };
+        value.textAlign = Label.TextAlign.RIGHT;
+        this._statsContainer.addChild(valueNode);
+        return { fill, track, valueNode, value, maximum, read, format, normalizedValue: 0 };
     }
 
-    private _makeDriveButton(): void {
+    private _makeDriveButton(): Node {
         const c = cfg.carSelect;
-        const cx = cfg.design.width / 2;
-        const node = new Node(cx, c.driveY);
+        const node = new Node(cfg.design.width / 2, c.driveY);
         node.name = 'DriveThisCarButton';
         node.width = c.driveWidth;
         node.height = c.driveHeight;
 
-        const backgroundNode = new Node();
-        const background = backgroundNode.addComponent(Graphics);
-        background.tessellate = true;
-        background.setStroke(c.driveStroke, 3);
-        background.drawRoundedRectangle(c.driveWidth, c.driveHeight, c.driveHeight * 0.5, c.driveBackground);
-        node.addChild(backgroundNode);
+        const shadowNode = new Node(0, -c.driveShadowOffset);
+        shadowNode.width = c.driveWidth + c.driveShadowSpread;
+        shadowNode.height = c.driveHeight + c.driveShadowSpread;
+        const shadow = shadowNode.addComponent(Sprite);
+        shadow.sizeMode = Sprite.SizeMode.CUSTOM;
+        shadow.texture = this._makeButtonTexture(c.driveShadowColor, c.driveShadowColor, 'transparent');
+        node.addChild(shadowNode);
+
+        const background = node.addComponent(Sprite);
+        background.sizeMode = Sprite.SizeMode.CUSTOM;
+        background.texture = this._makeButtonTexture(
+            c.driveGradientTop,
+            c.driveGradientBottom,
+            c.driveStroke,
+        );
 
         const labelNode = new Node();
-        const label = labelNode.addComponent(Label);
+        const label = labelNode.addComponent(BitmapText);
         label.fontSize = c.driveFontSize;
-        label.fontWeight = 800;
+        label.fontFamily = cfg.loading.fontFamily;
         label.color = c.driveColor;
+        label.textAlign = 'center';
         label.text = c.driveText;
         node.addChild(labelNode);
 
@@ -235,6 +387,7 @@ export class CarSelectPanel {
         }, this);
         this._root.addChild(node);
         this._interactiveNodes.push(node);
+        return node;
     }
 
     private _navigate(direction: -1 | 1): void {
@@ -248,42 +401,127 @@ export class CarSelectPanel {
     }
 
     private _refresh(): void {
-        const c = cfg.carSelect;
         const spec = cfg.vehicles.models[this._index];
         this._name.text = spec.label;
         this._description.text = spec.description;
         for (const row of this._stats) {
             const value = row.read(spec);
-            row.fill.width = c.statBarWidth * Math.min(1, Math.max(0, value / row.maximum));
+            row.normalizedValue = Math.min(1, Math.max(0, value / row.maximum));
             row.value.text = row.format(value);
+        }
+        this._layoutStatsBars();
+    }
+
+    private _layoutResponsive(force = false): void {
+        const c = cfg.carSelect;
+        const designWidth = inputListener.engine?.display?.designWidth ?? cfg.design.width;
+        if (!force && Math.abs(designWidth - this._lastDesignWidth) < 0.5) return;
+        this._lastDesignWidth = designWidth;
+
+        const statsWidth = Math.min(
+            c.statsPanelWidth,
+            Math.max(c.statsPanelMinWidth, designWidth - c.statsPanelLeft - c.statsPanelMinimumRight),
+        );
+        this._statsContainer.width = statsWidth;
+        this._statsWidget.right = Math.max(
+            c.statsPanelMinimumRight,
+            designWidth - c.statsPanelLeft - statsWidth,
+        );
+        this._driveButton.x = designWidth * 0.5;
+        this._dragZone.x = designWidth * 0.5;
+        this._layoutStatsBars();
+    }
+
+    private _layoutStatsBars(): void {
+        const c = cfg.carSelect;
+        const statsWidth = this._statsContainer.width;
+        const valueX = statsWidth - c.statValueRight;
+        const barWidth = Math.max(
+            c.statBarMinWidth,
+            valueX - c.statValueGap - c.statBarX,
+        );
+        for (const row of this._stats) {
+            row.track.width = barWidth;
+            row.fill.width = barWidth * row.normalizedValue;
+            row.valueNode.x = valueX;
         }
     }
 
-    private _makeLabelBitmap(x: number, y: number, fontSize: number, color: string): BitmapText {
+    private _makeGradientTexture(left: string, center: string, right: string): HTMLCanvasElement {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 8;
+        const context = canvas.getContext('2d');
+        if (!context) return canvas;
+        const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+        gradient.addColorStop(0, left);
+        gradient.addColorStop(0.5, center);
+        gradient.addColorStop(1, right);
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        return canvas;
+    }
+
+    private _makeButtonTexture(top: string, bottom: string, stroke: string): HTMLCanvasElement {
+        const c = cfg.carSelect;
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        if (!context) return canvas;
+        const inset = 4;
+        const radius = c.driveCornerRadius * canvas.height / c.driveHeight;
+        context.beginPath();
+        context.roundRect(inset, inset, canvas.width - inset * 2, canvas.height - inset * 2, radius);
+        context.clip();
+        const gradient = context.createLinearGradient(0, inset, 0, canvas.height - inset);
+        gradient.addColorStop(0, top);
+        gradient.addColorStop(1, bottom);
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        if (stroke !== 'transparent') {
+            context.lineWidth = 3;
+            context.strokeStyle = stroke;
+            context.stroke();
+        }
+        return canvas;
+    }
+
+    private _makeBitmapLabel(
+        parent: Node,
+        x: number,
+        y: number,
+        fontSize: number,
+        color: string,
+    ): BitmapText {
         const node = new Node(x, y);
         const label = node.addComponent(BitmapText);
         label.fontSize = fontSize;
         label.fontFamily = cfg.loading.fontFamily;
         label.color = color;
         label.textAlign = 'center';
-        this._root.addChild(node);
+        parent.addChild(node);
         return label;
     }
 
     private _makeLabel(
+        parent: Node,
         x: number,
         y: number,
         fontSize: number,
         color: string,
         dynamic = false,
+        textAlign: (typeof Label.TextAlign)[keyof typeof Label.TextAlign] = Label.TextAlign.CENTER,
+        anchorX = 0.5,
     ): Label {
         const node = new Node(x, y);
+        node.anchorX = anchorX;
         const label = node.addComponent(Label);
         label.fontSize = fontSize;
         label.color = color;
         label.dynamic = dynamic;
-        label.textAlign = Label.TextAlign.CENTER;
-        this._root.addChild(node);
+        label.textAlign = textAlign;
+        parent.addChild(node);
         return label;
     }
 }
