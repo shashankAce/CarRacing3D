@@ -1,19 +1,20 @@
-import { assetCache, BitmapText, ColorRect, Graphics, Label, Node, Scene } from 'noonengine';
+import { assetCache, ColorRect, Graphics, Node, Scene, Sprite } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 export type LoadingStage = 'assets' | 'compile' | 'world' | 'shadows';
+
+const LOADING_BACKGROUND_ALIAS = 'loading-background';
 
 /** Full-screen startup overlay driven only by real loading milestones. */
 export class LoadingScreen {
 
     private _backdrop: Node;
+    private _backgroundImage: Node;
+    private _backgroundSprite: Sprite;
     private _track: Node;
     private _fill: Node;
-    private _title: BitmapText;
-    private _subtitle: BitmapText;
-    private _status: Label;
-    private _percent: Label;
-    private _decorations: Node[] = [];
+    private _fillGraphic: Graphics;
+    // private _status: Label;
     private _visible = true;
 
     constructor(scene: Scene) {
@@ -27,104 +28,83 @@ export class LoadingScreen {
         this._backdrop.addComponent(ColorRect).color = c.backdropColor;
         scene.addChild(this._backdrop);
 
-        const cardNode = new Node(cx, c.cardY);
-        const card = cardNode.addComponent(Graphics);
-        card.setStroke(c.cardStroke, 2);
-        card.drawRoundedRectangle(c.cardWidth, c.cardHeight, c.cardRadius, c.cardColor);
-        scene.addChild(cardNode);
-        this._decorations.push(cardNode);
+        // This starts empty as a safe fallback. The image is assigned only
+        // after AssetCache finishes loading it, so it also works in packed
+        // playables where `res/` files are rewritten to data URIs.
+        this._backgroundImage = new Node(cx, cy);
+        this._backgroundImage.width = cfg.design.width;
+        this._backgroundImage.height = cfg.design.width / c.backgroundImageAspectRatio;
+        this._backgroundSprite = this._backgroundImage.addComponent(Sprite);
+        scene.addChild(this._backgroundImage);
 
-        this._title = this._makeLabel(scene, cx, c.titleY, c.titleFontSize, c.titleColor);
-        this._title.text = c.title;
-
-        this._subtitle = this._makeLabel(scene, cx, c.subtitleY, c.subtitleFontSize, c.subtitleColor);
-        this._subtitle.text = c.subtitle;
-
-        this._status = this._makeLabelTTF(scene, cx, c.statusY, c.statusFontSize, c.statusColor);
-        this._percent = this._makeLabelTTF(scene, cx, c.percentY, c.percentFontSize, c.percentColor);
-
+        // this._status = this._makeLabelTTF(scene, cx, c.statusY, c.statusFontSize, c.statusColor);
         this._track = new Node(cx, c.barY);
-        this._track.width = c.barWidth;
-        this._track.height = c.barHeight;
-        this._track.addComponent(ColorRect).color = c.trackColor;
+        const trackGraphic = this._track.addComponent(Graphics);
+        trackGraphic.setNoFill()
+            .setStroke(c.trackColor, c.barStrokeWidth)
+            .drawRoundedRectangle(c.barWidth, c.barHeight, c.barHeight / 2);
         scene.addChild(this._track);
 
-        // Keep the fill's left edge aligned with the track while its width
-        // changes; the default centre anchor would expand in both directions.
-        this._fill = new Node(cx - c.barWidth / 2, c.barY);
+        // The fill starts inside the outline and grows from left to right.
+        this._fill = new Node(cx - c.barWidth / 2 + c.barInset, c.barY);
         this._fill.anchorX = 0;
-        this._fill.height = c.barHeight;
-        this._fill.addComponent(ColorRect).color = c.fillColor;
+        this._fillGraphic = this._fill.addComponent(Graphics);
+        this._fillGraphic.tessellate = true;
         scene.addChild(this._fill);
 
         this.setProgress('assets', 0, 0);
-        void this._loadBitmapFont();
+        void this._preloadAssets();
     }
 
     setProgress(stage: LoadingStage, stageProgress: number, overallProgress: number): void {
         const c = cfg.loading;
         const status = c.stages[stage];
         const total = Math.min(1, Math.max(0, overallProgress));
-        this._status.text = status;
-        this._percent.text = `${Math.round(total * 100)}%`;
-        this._fill.width = c.barWidth * total;
+        // this._status.text = status;
+        this._fill.active = total > 0;
+        if (total > 0) {
+            const fillHeight = c.barHeight - c.barInset * 2;
+            this._fillGraphic.drawRoundedRectangle(
+                (c.barWidth - c.barInset * 2) * total,
+                fillHeight,
+                fillHeight / 2,
+                c.fillColor,
+            );
+        }
 
         // Stage-local completion is intentionally not shown as a fake counter:
         // the wide bar represents the real overall startup work instead.
         void stageProgress;
+        void status;
     }
 
     showError(): void {
-        this._status.text = cfg.loading.errorText;
-        this._percent.text = '';
+        // this._status.text = cfg.loading.errorText;
     }
 
     hide(): void {
         if (!this._visible) return;
         this._visible = false;
         this._backdrop.active = false;
+        this._backgroundImage.active = false;
         this._track.active = false;
         this._fill.active = false;
-        this._title.node.active = false;
-        this._subtitle.node.active = false;
-        this._status.node.active = false;
-        this._percent.node.active = false;
-        for (const node of this._decorations) node.active = false;
+        // this._status.node.active = false;
     }
 
-    private async _loadBitmapFont(): Promise<void> {
+    private async _preloadAssets(): Promise<void> {
         await assetCache.preloadAssets([
+            // Keep the source literal in this preload entry: the playable packer
+            // detects it and embeds the image in its single HTML output.
+            { src: 'res/loading.jpg', type: 'image', alias: LOADING_BACKGROUND_ALIAS },
             // Kept explicit so production asset trimming retains the atlas page
             // referenced by the BMFont descriptor.
             { src: 'res/MonsterRacing.png', type: 'image' },
         ]);
+        this._backgroundSprite.texture = assetCache.getAsset(LOADING_BACKGROUND_ALIAS);
+        // The car-select title uses this font after the loading screen closes.
         await assetCache.preloadAssets([
             { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
         ]);
-
-        // BitmapText may have performed its first layout before the atlas was
-        // available. Re-layout once the font is in the cache.
-        for (const text of [this._title, this._subtitle, this._status, this._percent]) text.markDirty();
-    }
-
-    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string): BitmapText {
-        const node = new Node(x, y);
-        const label = node.addComponent(BitmapText);
-        label.fontSize = fontSize;
-        label.fontFamily = cfg.loading.fontFamily;
-        label.color = color;
-        label.textAlign = 'center';
-        scene.addChild(node);
-        return label;
-    }
-    private _makeLabelTTF(scene: Scene, x: number, y: number, fontSize: number, color: string): Label {
-        const node = new Node(x, y);
-        const label = node.addComponent(Label);
-        label.fontSize = fontSize;
-        label.fontFamily = 'Arial, sans-serif';
-        label.color = color;
-        label.textAlign = 'center';
-        scene.addChild(node);
-        return label;
     }
 }

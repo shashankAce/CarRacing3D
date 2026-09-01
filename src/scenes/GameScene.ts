@@ -301,11 +301,11 @@ export class GameScene extends Scene {
      */
     update(dt: number): void {
         if (this._startupStage) {
-            this._advanceStartup();
-            this._camera.update(dt, this._car, 0);
-            this._updateSun();
-            this._sky.update(this._camera.position);
-            this._clouds.update(dt, this._camera.position);
+            // this._advanceStartup();
+            // this._camera.update(dt, this._car, 0);
+            // this._updateSun();
+            // this._sky.update(this._camera.position);
+            // this._clouds.update(dt, this._camera.position);
             return;
         }
 
