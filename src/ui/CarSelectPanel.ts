@@ -91,6 +91,9 @@ export class CarSelectPanel {
             0,
         );
         this._name.fontWeight = 800;
+        this._name.fontFamily = 'rajdhani_bold';
+        this._name.fontStyle = 'italic';
+
         this._description = this._makeLabel(
             this._statsContainer,
             c.descriptionX,
@@ -137,6 +140,9 @@ export class CarSelectPanel {
             { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
             { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
             { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
+            { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
+            { src: 'res/fontTTF/rajdhani-light.ttf', type: 'font', fontName: 'rajdhani_light', alias: 'rajdhani_light' },
+            { src: 'res/fontTTF/rajdhani-semibold.ttf', type: 'font', fontName: 'rajdhani_semibold', alias: 'rajdhani_semibold' },
         ]);
         const chevron = assetCache.getAsset(CHEVRON_ALIAS);
         for (const sprite of this._arrowSprites) sprite.texture = chevron;
@@ -186,8 +192,8 @@ export class CarSelectPanel {
         const widget = header.addComponent(Widget);
         widget.alignToWindow = true;
         widget.left = 0;
-        widget.right = 0;
-        widget.top = 0;
+        // widget.right = 0;
+        // widget.top = 0;
 
         const background = header.addComponent(Sprite);
         background.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -207,7 +213,7 @@ export class CarSelectPanel {
         edgeWidget.right = 0;
         header.addChild(lowerEdge);
 
-        const title = this._makeBitmapLabel(
+        const title = this._makeLabel(
             header,
             c.titleMainX,
             c.titleBaselineY,
@@ -215,7 +221,9 @@ export class CarSelectPanel {
             c.titleColor,
         );
         title.text = c.title;
-        const accent = this._makeBitmapLabel(
+        title.fontFamily = 'rajdhani_bold';
+        title.fontStyle = 'italic';
+        const accent = this._makeLabel(
             header,
             c.titleAccentX,
             c.titleBaselineY,
@@ -223,15 +231,17 @@ export class CarSelectPanel {
             c.titleAccentColor,
         );
         accent.text = c.titleAccent;
+        accent.fontFamily = 'rajdhani_bold';
+        accent.fontStyle = 'italic';
     }
 
     private _makeNameAccent(): void {
         const c = cfg.carSelect;
-        const accentNode = new Node(c.carNameAccentX, c.carNameY);
+        const accentNode = new Node(c.carNameAccentX, c.carNameY + 2);
         const accent = accentNode.addComponent(ColorRect);
         accent.color = c.titleAccentColor;
         accentNode.width = c.carNameAccentWidth;
-        accentNode.height = c.carNameFontSize;
+        accentNode.height = c.carNameFontSize - 6;
         accentNode.rotation = c.carNameAccentRotation;
         this._statsContainer.addChild(accentNode);
     }
@@ -321,6 +331,7 @@ export class CarSelectPanel {
             Label.TextAlign.LEFT,
             0,
         );
+        label.fontFamily = 'rajdhani_semibold';
         label.fontWeight = 700;
         label.text = title;
 
@@ -339,13 +350,14 @@ export class CarSelectPanel {
         this._statsContainer.addChild(fill);
 
         const valueNode = new Node(c.statsPanelWidth, y + c.statBarOffsetY);
-        valueNode.anchorX = 1;
+        valueNode.anchorX = 0;
         const value = valueNode.addComponent(Label);
         value.fontSize = c.statValueFontSize;
         value.color = c.statValueColor;
         value.dynamic = true;
         value.fontWeight = 700;
-        value.textAlign = Label.TextAlign.RIGHT;
+        value.fontFamily = 'rajdhani_semibold';
+        value.textAlign = Label.TextAlign.LEFT;
         this._statsContainer.addChild(valueNode);
         return { fill, track, valueNode, value, maximum, read, format, normalizedValue: 0 };
     }
@@ -357,13 +369,13 @@ export class CarSelectPanel {
         node.width = c.driveWidth;
         node.height = c.driveHeight;
 
-        const shadowNode = new Node(0, -c.driveShadowOffset);
-        shadowNode.width = c.driveWidth + c.driveShadowSpread;
-        shadowNode.height = c.driveHeight + c.driveShadowSpread;
-        const shadow = shadowNode.addComponent(Sprite);
-        shadow.sizeMode = Sprite.SizeMode.CUSTOM;
-        shadow.texture = this._makeButtonTexture(c.driveShadowColor, c.driveShadowColor, 'transparent');
-        node.addChild(shadowNode);
+        // const shadowNode = new Node(0, -c.driveShadowOffset);
+        // shadowNode.width = c.driveWidth + c.driveShadowSpread;
+        // shadowNode.height = c.driveHeight + c.driveShadowSpread;
+        // const shadow = shadowNode.addComponent(Sprite);
+        // shadow.sizeMode = Sprite.SizeMode.CUSTOM;
+        // shadow.texture = this._makeButtonTexture(c.driveShadowColor, c.driveShadowColor, 'transparent');
+        // node.addChild(shadowNode);
 
         const background = node.addComponent(Sprite);
         background.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -374,12 +386,14 @@ export class CarSelectPanel {
         );
 
         const labelNode = new Node();
-        const label = labelNode.addComponent(BitmapText);
+        const label = labelNode.addComponent(Label);
         label.fontSize = c.driveFontSize;
         label.fontFamily = cfg.loading.fontFamily;
         label.color = c.driveColor;
         label.textAlign = 'center';
         label.text = c.driveText;
+        label.fontFamily = 'rajdhani_bold';
+        // label.fontStyle = 'italic';
         node.addChild(labelNode);
 
         node.on(Input.POINTER_DOWN, () => {
@@ -436,6 +450,7 @@ export class CarSelectPanel {
         const c = cfg.carSelect;
         const statsWidth = this._statsContainer.width;
         const valueX = statsWidth - c.statValueRight;
+        const valueXX = statsWidth - c.statValueRight - 60;
         const barWidth = Math.max(
             c.statBarMinWidth,
             valueX - c.statValueGap - c.statBarX,
@@ -443,7 +458,7 @@ export class CarSelectPanel {
         for (const row of this._stats) {
             row.track.width = barWidth;
             row.fill.width = barWidth * row.normalizedValue;
-            row.valueNode.x = valueX;
+            row.valueNode.x = valueXX;
         }
     }
 

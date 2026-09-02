@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GameEngine, createPlatform, ResolutionPolicy, RendererType } from 'noonengine';
+import { GameEngine, createPlatform, ResolutionPolicy, RendererType, InspectorOverlay } from 'noonengine';
 import { gameConfig as cfg } from './config/gameConfig';
 import { GameScene } from './scenes/GameScene';
 import { installFogCurve } from './procedural/fogCurve';
@@ -48,3 +48,4 @@ engine.runScene(new GameScene(
     () => { void platform.notifyReady(); },
 ));
 engine.start();
+const inspector = new InspectorOverlay(engine);
