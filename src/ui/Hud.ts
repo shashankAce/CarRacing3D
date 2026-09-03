@@ -19,6 +19,7 @@ import type { GameState } from '../game/GameState';
  */
 export class Hud {
 
+    private readonly _root = new Node();
     private _distance: Label;
     private _speed: Label;
     private _hint: Label;
@@ -33,6 +34,8 @@ export class Hud {
 
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
+        this._root.name = 'Hud';
+        scene.addChild(this._root);
         // These two change every frame — hence `dynamic`. The hint doesn't.
 
 
@@ -42,7 +45,7 @@ export class Hud {
         distW.top = 90;
         distW.left = 50;
         distW.alignToWindow = true;
-        scene.addChild(distNode);
+        this._root.addChild(distNode);
         distPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
 
         this._distance = this._makeLabel(0, -3, cfg.hud.distanceFontSize, cfg.hud.textColor, true);
@@ -59,7 +62,7 @@ export class Hud {
         speedW.bottom = 40;
         speedW.left = 50;
         speedW.alignToWindow = true;
-        scene.addChild(speedNode);
+        this._root.addChild(speedNode);
         speedPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
 
         this._speed = this._makeLabel(0, -4, cfg.hud.speedFontSize, cfg.hud.textColor, true);
@@ -69,12 +72,12 @@ export class Hud {
 
         this._hint = this._makeLabel(cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
         this._hint.text = cfg.hud.hintText;
-        scene.addChild(this._hint.node);
+        this._root.addChild(this._hint.node);
 
 
 
         let cutNode = new Node(0, 0);
-        scene.addChild(cutNode);
+        this._root.addChild(cutNode);
         let cutPanel = cutNode.addComponent(Graphics);
         cutPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
         let cutW = cutNode.addComponent(Widget);
@@ -88,7 +91,7 @@ export class Hud {
         this._fuel = this._makeLabel(cx, cfg.hud.fuelY, cfg.hud.fuelFontSize, cfg.hud.fuelColor, true);
         this._fuel.node.name = 'FuelNode';
         this._fuel.setShadow(0, 2, 15, '#000000cc');
-        scene.addChild(this._fuel.node);
+        this._root.addChild(this._fuel.node);
         // Monospace, or the gauge's width changes as cells flip and it jitters.
         this._fuel.fontFamily = 'monospace';
         this._fuel.fontStyle = 'bold';
@@ -146,9 +149,19 @@ export class Hud {
         if (hasSteered && this._hint.text !== '') this._hint.text = '';
     }
 
-    /** Hides gameplay readouts while the car-selection screen owns the UI. */
+    /**
+     * Hides gameplay readouts while the pause/car-selection/game-over screens own
+     * the UI. Deactivates the whole node tree — rather than just blanking each
+     * label's text — because a dynamic, fixed-width, word-wrapping label (like
+     * `_distance`, which uses `Overflow.SHRINK`) never actually re-bakes for an
+     * emptied string: the wrap pass drops the trailing empty line, `_lines` comes
+     * back length 0, and the engine's bake step treats "0 lines and empty text" as
+     * "nothing changed, skip" — leaving the last rendered digits on the label's
+     * canvas and stuck on screen instead of clearing it.
+     */
     setVisible(visible: boolean): void {
         this._visible = visible;
+        this._root.active = visible;
         if (!visible) {
             this._distance.text = '';
             this._speed.text = '';
