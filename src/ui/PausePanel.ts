@@ -26,7 +26,11 @@ export class PausePanel {
         void shadow;
         void panel;
 
-        this._label(cx, p.titleY + 55, p.icon, p.iconFontSize, c.mutedColor, 900);
+        const iconY = p.titleY + 80;
+        const ring = new Node(cx, iconY);
+        ring.addComponent(Graphics).setStroke(c.mutedColor, p.iconStrokeWidth).setFill(c.mutedColor).drawCircle(p.iconRadius);
+        this._root.addChild(ring);
+        this._label(cx, iconY - 5, p.icon, p.iconFontSize, '#2a2a2a', 900);
         this._label(cx, p.titleY, p.title, p.titleFontSize, c.surfaceColor, 900);
 
         const resume = this._button(cx, p.resumeY, p.resumeText, c.orange, c.orangeShelf, c.buttonText, p.buttonFontSize, onResume);
