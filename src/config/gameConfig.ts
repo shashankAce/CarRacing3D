@@ -1572,7 +1572,7 @@ export const gameConfig = {
         foliageHighColor: 0x71b53a,
 
         /** Average metres between placement candidates, before rejection. */
-        spacing: 18,
+        spacing: 38,
         /** Candidates on ground steeper than this are rejected. */
         maxSlope: 0.55,
         /**
