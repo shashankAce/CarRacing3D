@@ -1,4 +1,4 @@
-import { Node, Label, Scene } from 'noonengine';
+import { Node, Label, Scene, Graphics, Widget } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { GameState } from '../game/GameState';
 
@@ -34,14 +34,64 @@ export class Hud {
     constructor(scene: Scene) {
         const cx = cfg.design.width / 2;
         // These two change every frame — hence `dynamic`. The hint doesn't.
-        this._distance = this._makeLabel(scene, cx, cfg.hud.distanceY, cfg.hud.distanceFontSize, cfg.hud.textColor, true);
-        this._speed = this._makeLabel(scene, cx, cfg.hud.speedY, cfg.hud.speedFontSize, cfg.hud.textColor, true);
-        this._hint = this._makeLabel(scene, cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
+
+
+        let distNode = new Node(0, 0);
+        let distPanel = distNode.addComponent(Graphics);
+        let distW = distNode.addComponent(Widget);
+        distW.top = 90;
+        distW.left = 50;
+        distW.alignToWindow = true;
+        scene.addChild(distNode);
+        distPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
+
+        this._distance = this._makeLabel(0, -3, cfg.hud.distanceFontSize, cfg.hud.textColor, true);
+        this._distance.fontFamily = 'rajdhani_bold';
+        this._distance.overflow = Label.Overflow.SHRINK;
+        this._distance.node.width = 150;
+        this._distance.node.height = 50;
+        distNode.addChild(this._distance.node);
+
+
+        let speedNode = new Node(0, 0);
+        let speedPanel = speedNode.addComponent(Graphics);
+        let speedW = speedNode.addComponent(Widget);
+        speedW.bottom = 40;
+        speedW.left = 50;
+        speedW.alignToWindow = true;
+        scene.addChild(speedNode);
+        speedPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
+
+        this._speed = this._makeLabel(0, -4, cfg.hud.speedFontSize, cfg.hud.textColor, true);
+        this._speed.fontFamily = 'rajdhani_bold';
+        // this._speed.fontStyle = 'italic';
+        speedNode.addChild(this._speed.node);
+
+        this._hint = this._makeLabel(cx, cfg.hud.hintY, cfg.hud.hintFontSize, cfg.hud.hintColor);
         this._hint.text = cfg.hud.hintText;
-        this._cuts = this._makeLabel(scene, cx, cfg.hud.cutsY, cfg.hud.cutsFontSize, cfg.hud.cutsColor, true);
-        this._fuel = this._makeLabel(scene, cx, cfg.hud.fuelY, cfg.hud.fuelFontSize, cfg.hud.fuelColor, true);
+        scene.addChild(this._hint.node);
+
+
+
+        let cutNode = new Node(0, 0);
+        scene.addChild(cutNode);
+        let cutPanel = cutNode.addComponent(Graphics);
+        cutPanel.drawRoundedRectangle(150, 50, 10, '#0000006e');
+        let cutW = cutNode.addComponent(Widget);
+        cutW.top = 90;
+        cutW.right = 50;
+        cutW.alignToWindow = true;
+        this._cuts = this._makeLabel(0, -3, cfg.hud.cutsFontSize, cfg.hud.cutsColor, true);
+        this._cuts.fontFamily = 'rajdhani_bold';
+        cutNode.addChild(this._cuts.node);
+
+        this._fuel = this._makeLabel(cx, cfg.hud.fuelY, cfg.hud.fuelFontSize, cfg.hud.fuelColor, true);
+        this._fuel.node.name = 'FuelNode';
+        this._fuel.setShadow(0, 2, 15, '#000000cc');
+        scene.addChild(this._fuel.node);
         // Monospace, or the gauge's width changes as cells flip and it jitters.
         this._fuel.fontFamily = 'monospace';
+        this._fuel.fontStyle = 'bold';
     }
 
     /**
@@ -52,14 +102,13 @@ export class Hud {
      * baked synchronously, which is what the engine documents it for
      * ("use for counters/timers").
      */
-    private _makeLabel(scene: Scene, x: number, y: number, fontSize: number, color: string, dynamic = false): Label {
+    private _makeLabel(x: number, y: number, fontSize: number, color: string, dynamic = false): Label {
         const node = new Node(x, y);
         const label = node.addComponent(Label);
         label.fontSize = fontSize;
         label.color = color;
         label.dynamic = dynamic;
         label.text = '';
-        scene.addChild(node);
         return label;
     }
 

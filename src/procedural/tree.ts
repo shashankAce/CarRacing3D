@@ -115,7 +115,8 @@ export function createTreeMaterial(): THREE.MeshStandardMaterial {
          * surface already has (F0 0.04) is the correct thing to widen here, and
          * roughness is its dial.
          */
-        roughness: 0.4,
+        roughness: 0.8,
+        metalness: 0.1,
         // Flat shading suits the low-poly look and means the cones read as
         // faceted tiers instead of smooth blobs.
         flatShading: true,

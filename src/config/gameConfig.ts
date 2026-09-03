@@ -678,39 +678,42 @@ export const gameConfig = {
             mainMenuText: 'CHANGE CAR',
         },
         gameEnd: {
-            // Cinematic backdrop gradient (reference: reference/design/gameend) — dark
-            // near the top and bottom edges, transparent through the middle, so the
-            // crashed scene stays visible behind the message instead of a flat scrim.
-            backdropTop: '#0e0e0ee6',
-            backdropMid: '#0e0e0e00',
-            backdropBottom: '#0e0e0ef2',
-            backdropTopStop: 0.34,
-            backdropBottomStop: 0.62,
+            // Card layout (reference/design/gameover/code.html). The reference panel's
+            // "tactile-gradient" fill is deliberately not used — the card is a flat
+            // surface, same as the pause modal, per DESIGN.md's shared overlay language.
+            panelY: 650,
+            panelHeight: 520,
+            framePad: 28,
 
-            // The reference's hero headline — kept verbatim as the emotional hook that
-            // pulls the player into another run; the crash reason/stats sit below it.
-            headline: 'HOW\nFAR CAN\nYOU\nDRIVE?',
-            headlineY: 800,
-            headlineFontSize: 150,
+            // Crash reason header (e.g. "CRASHED" / "OUT OF FUEL") stands in for the
+            // reference's static "GAME OVER" headline.
+            reasonColor: '#ffb4ab',
+            reasonFontSize: 46,
+            reasonY: 858,
 
-            reasonY: 954,
-            statsY: 898,
-            reasonFontSize: 32,
-            statsFontSize: 22,
-            statsLetterSpacing: 2,
+            dividerY: 816,
+            dividerColor: '#35353580',
 
-            buttonY: 300,
-            brandY: 168,
-            taglineY: 112,
-            buttonFontSize: 27,
-            brandFontSize: 34,
-            brandLetterSpacing: 4,
-            taglineFontSize: 15,
-            taglineLetterSpacing: 3,
+            // Distance / score bento boxes.
+            statBoxY: 726,
+            statBoxHeight: 140,
+            statBoxGap: 16,
+            statBoxColor: '#2e4d36cc',
+            statBoxStroke: '#87abe54d',
+            statLabelFontSize: 15,
+            statNumberFontSize: 38,
+            distanceColor: '#accfb1',
+            scoreColor: '#ffb77d',
 
-            replayText: 'RACE AGAIN  ▶',
-            brand: 'FAST LANE',
-            tagline: 'ENDLESS RACING ADVENTURE',
+            // Best-distance (persisted, see GameOverPanel) / cuts strip.
+            secondaryY: 588,
+            secondaryHeight: 88,
+            secondaryLabelFontSize: 14,
+            secondaryValueFontSize: 22,
+
+            buttonY: 475,
+            buttonFontSize: 26,
+            playAgainText: 'PLAY AGAIN  ▶',
         },
         pauseButton: {
             size: 68,
@@ -782,19 +785,6 @@ export const gameConfig = {
          */
         perfRepaintInterval: 1.0,
         /**
-         * NOTE ON THE Y AXIS: node positions are Y-UP — y is measured from the
-         * BOTTOM of the design space. So `hintY: 430` sits low on the screen and
-         * `distanceY: 1195` sits at the very top.
-         *
-         * Don't be misled by `Display.js`'s "top-left origin, Y-down" comment:
-         * that describes `screenToDesignInto`, the screen→design step of POINTER
-         * conversion, which is a different space from node placement (pointer
-         * events then go through `camera.screenToWorld`, landing back in Y-up
-         * world coords).
-         */
-        distanceY: 1195,
-        speedY: 1135,
-        /**
          * Below the buttons rather than over the road: at mid-height it sat on
          * the car, and the band between the buttons and the game-over panel is
          * too narrow to hold it. Down here it also reads as a legend for the
@@ -804,7 +794,7 @@ export const gameConfig = {
         /** Cars cut — the skill readout, so it sits with the distance. */
         cutsY: 1088,
         cutsFontSize: 30,
-        cutsColor: '#ffd98a',
+        cutsColor: '#eaff04',
         /**
          * Fuel gauge, drawn as block glyphs in a monospace label. A real bar
          * would need a ColorRect and the `graphics` system, which auto-trim
@@ -828,7 +818,7 @@ export const gameConfig = {
         restartFontSize: 30,
         restartText: 'TAP TO RESTART',
         restartColor: '#9fe8ff',
-        distanceFontSize: 62,
+        distanceFontSize: 42,
         speedFontSize: 34,
         hintFontSize: 26,
         textColor: '#f4f9fb',

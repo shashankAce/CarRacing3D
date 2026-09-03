@@ -1,0 +1,183 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Game Over</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;700&amp;family=Montserrat:ital,wght@0,800;0,900;1,800&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary": "#accfb1",
+                        "surface-bright": "#393939",
+                        "outline-variant": "#564334",
+                        "surface-dim": "#131313",
+                        "tertiary-container": "#87abe5",
+                        "tertiary-fixed-dim": "#a7c8ff",
+                        "on-secondary-fixed": "#02210e",
+                        "inverse-on-surface": "#303030",
+                        "on-error-container": "#ffdad6",
+                        "error-container": "#93000a",
+                        "surface-tint": "#ffb77d",
+                        "primary": "#ffb77d",
+                        "surface-container-high": "#2a2a2a",
+                        "on-secondary-fixed-variant": "#2e4d36",
+                        "surface-variant": "#353535",
+                        "error": "#ffb4ab",
+                        "on-surface": "#e5e2e1",
+                        "surface": "#131313",
+                        "on-secondary-container": "#9bbea0",
+                        "primary-fixed-dim": "#ffb77d",
+                        "on-tertiary-fixed": "#001c3b",
+                        "on-primary-fixed-variant": "#6e3900",
+                        "on-surface-variant": "#ddc1ae",
+                        "on-tertiary": "#003060",
+                        "primary-fixed": "#ffdcc3",
+                        "on-primary-fixed": "#2f1500",
+                        "secondary-fixed-dim": "#accfb1",
+                        "on-tertiary-fixed-variant": "#1e477b",
+                        "on-background": "#e5e2e1",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-container": "#ff8c00",
+                        "surface-container-highest": "#353535",
+                        "secondary-container": "#2e4d36",
+                        "tertiary": "#a7c8ff",
+                        "on-error": "#690005",
+                        "on-primary": "#4d2600",
+                        "surface-container-low": "#1b1c1c",
+                        "background": "#131313",
+                        "tertiary-fixed": "#d5e3ff",
+                        "outline": "#a48c7a",
+                        "secondary-fixed": "#c7eccc",
+                        "surface-container": "#1f2020",
+                        "inverse-primary": "#904d00",
+                        "on-tertiary-container": "#123f72",
+                        "on-secondary": "#183721",
+                        "on-primary-container": "#623200",
+                        "inverse-surface": "#e5e2e1"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "hud-padding": "32px",
+                        "safe-margin": "24px",
+                        "unit": "8px",
+                        "gutter": "16px"
+                    },
+                    "fontFamily": {
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Montserrat"],
+                        "display-hero": ["Montserrat"],
+                        "body-md": ["Inter"],
+                        "stat-number": ["Montserrat"],
+                        "headline-lg": ["Montserrat"]
+                    },
+                    "fontSize": {
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["28px", { "lineHeight": "34px", "fontWeight": "800" }],
+                        "display-hero": ["72px", { "lineHeight": "80px", "letterSpacing": "-0.04em", "fontWeight": "900" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "500" }],
+                        "stat-number": ["48px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "900" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "800" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .tactile-gradient {
+            background: linear-gradient(180deg, theme('colors.surface-container-high') 0%, theme('colors.surface-container-low') 100%);
+        }
+        .btn-primary {
+            background-color: theme('colors.primary-container');
+            color: #222222;
+            box-shadow: 0 4px 0 0 theme('colors.on-primary-fixed-variant');
+            position: relative;
+            transition: all 0.1s ease;
+        }
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 1px;
+            background: rgba(255,255,255,0.3);
+            border-radius: inherit;
+        }
+        .btn-primary:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 0 theme('colors.on-primary-fixed-variant');
+        }
+        .ambient-shadow {
+            box-shadow: 0 12px 32px 0 rgba(27, 48, 34, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background antialiased h-screen w-screen overflow-hidden flex flex-col justify-center items-center relative">
+<!-- Blurred Background -->
+<div class="absolute inset-0 z-0 bg-cover bg-center filter blur-md opacity-50" data-alt="A low-poly 3d rendering of an empty highway road stretching into the distance at sunset. The style is minimalist and modern, featuring vibrant neon orange and deep charcoal tones. The lighting is cinematic, casting long geometric shadows, evoking a sense of high-speed adventure in a synthetic world." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDWVgUYFKLyQhP6rb3pKW1gmm0owLAoI25rgPjtioLnEhMiRMBcqE1s54l3csrqJk7TTRaiyYijNjzNGlA90gITeExGKpb085yqP7OMCACq66-Gq4Euw2PvYCRXnwS4M39WzSJAbjYvB7AGC6lnNlisKOBDn8ZvYT5pXIHcrpvkjm5ZaYBfm3b73OrmBvuWDH5ONREMRhvnmXSokqADjc3sosRSeXaeDlOqrypIBNYWGWRpdp_CQx4PEA')">
+</div>
+<div class="absolute inset-0 z-0 bg-gradient-to-t from-background via-background/80 to-transparent"></div>
+<!-- Main Game Over Panel -->
+<main class="z-10 w-full max-w-sm px-gutter md:max-w-md">
+<div class="tactile-gradient ambient-shadow rounded-xl p-6 flex flex-col items-center border-t border-surface-bright relative overflow-hidden">
+<!-- Header -->
+<h1 class="font-display-hero text-display-hero text-error mb-8 text-center italic tracking-tighter w-full pb-4 border-b border-surface-variant/50 relative">
+                GAME OVER
+                <div class="absolute inset-0 bg-gradient-to-r from-error/0 via-error/10 to-error/0 animate-pulse pointer-events-none"></div>
+</h1>
+<!-- Large Stats (Bento-style layout) -->
+<div class="grid grid-cols-2 gap-4 w-full mb-6">
+<!-- Final Distance -->
+<div class="bg-secondary-container/80 rounded-lg p-4 border border-tertiary-container/30 flex flex-col items-center justify-center relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
+<span class="font-label-caps text-label-caps text-on-secondary-container mb-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">map</span> DISTANCE
+                    </span>
+<div class="font-stat-number text-stat-number text-secondary-fixed">3,450<span class="text-headline-lg-mobile font-headline-lg-mobile text-secondary-fixed/50">m</span></div>
+</div>
+<!-- Final Score -->
+<div class="bg-secondary-container/80 rounded-lg p-4 border border-tertiary-container/30 flex flex-col items-center justify-center relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
+<span class="font-label-caps text-label-caps text-on-secondary-container mb-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">sports_score</span> SCORE
+                    </span>
+<div class="font-stat-number text-stat-number text-primary">45,200</div>
+</div>
+</div>
+<!-- Secondary Stats -->
+<div class="w-full bg-surface-container-low rounded-lg p-3 mb-8 flex justify-between items-center border border-surface-variant">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant">BEST DISTANCE</span>
+<span class="font-body-md text-body-md text-on-surface">5,120 m</span>
+</div>
+<div class="h-8 w-px bg-surface-variant"></div>
+<div class="flex flex-col text-right">
+<span class="font-label-caps text-label-caps text-on-surface-variant flex items-center justify-end gap-1">
+                        COINS EARNED <span class="material-symbols-outlined text-primary text-[14px]" style="font-variation-settings: 'FILL' 1;">toll</span>
+</span>
+<span class="font-body-md text-body-md text-primary font-bold">+120</span>
+</div>
+</div>
+<!-- Actions -->
+<div class="w-full flex flex-col gap-4">
+<button class="btn-primary w-full py-4 rounded-lg font-headline-lg-mobile text-headline-lg-mobile flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">replay</span>
+                    RETRY
+                </button>
+<button class="w-full py-3 rounded-lg bg-surface-variant text-on-surface font-body-md text-body-md font-bold hover:bg-surface-bright transition-colors border border-outline-variant flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[20px]">menu</span>
+                    MAIN MENU
+                </button>
+</div>
+</div>
+</main>
+</body></html>
