@@ -676,24 +676,39 @@ export const gameConfig = {
             mainMenuText: 'CHANGE CAR',
         },
         gameEnd: {
-            eyebrow: 'ENDLESS RACING ADVENTURE',
+            // Cinematic backdrop gradient (reference: reference/design/gameend) — dark
+            // near the top and bottom edges, transparent through the middle, so the
+            // crashed scene stays visible behind the message instead of a flat scrim.
+            backdropTop: '#0e0e0ee6',
+            backdropMid: '#0e0e0e00',
+            backdropBottom: '#0e0e0ef2',
+            backdropTopStop: 0.34,
+            backdropBottomStop: 0.62,
+
+            // The reference's hero headline — kept verbatim as the emotional hook that
+            // pulls the player into another run; the crash reason/stats sit below it.
             headline: 'HOW FAR CAN\nYOU DRIVE?',
-            panelY: 540,
-            panelHeight: 356,
-            eyebrowY: 1120,
-            headlineY: 990,
-            titleY: 666,
-            statsY: 570,
-            buttonY: 265,
-            brandY: 130,
-            eyebrowFontSize: 16,
-            headlineFontSize: 48,
-            titleFontSize: 34,
-            statsFontSize: 25,
+            headlineY: 1104,
+            headlineFontSize: 46,
+
+            reasonY: 954,
+            statsY: 898,
+            reasonFontSize: 32,
+            statsFontSize: 22,
+            statsLetterSpacing: 2,
+
+            buttonY: 300,
+            brandY: 168,
+            taglineY: 112,
             buttonFontSize: 27,
-            brandFontSize: 31,
+            brandFontSize: 34,
+            brandLetterSpacing: 4,
+            taglineFontSize: 15,
+            taglineLetterSpacing: 3,
+
             replayText: 'RACE AGAIN  ▶',
             brand: 'FAST LANE',
+            tagline: 'ENDLESS RACING ADVENTURE',
         },
         pauseButton: {
             size: 68,
@@ -860,7 +875,8 @@ export const gameConfig = {
             { id: 'microbus', label: 'MICRO BUS', description: 'Heavy, dependable and built for control.', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
         ],
         materials: {
-            pixelColors: { roughness: 0.22, metalness: 0.05 },
+            /** Car body paint (the pixel-colour palette texture covers the whole shell). */
+            pixelColors: { roughness: 0, metalness: 0.5 },
             glass: { color: 0x333333, roughness: 0.12, metalness: 0.1, opacity: 0.545 },
             headlights: { color: 0xffd800, emissive: 0xffb000, emissiveIntensity: 3.5, roughness: 0.3 },
         },
@@ -877,8 +893,8 @@ export const gameConfig = {
         loadingText: 'LOADING CARS…',
         driveText: 'DRIVE THIS CAR',
         headerHeight: 100,
-        titleMainX: -40,
-        titleAccentX: 92,
+        titleMainX: -47,
+        titleAccentX: 126,
         titleBaselineY: 0,
         arrowY: 650,
         arrowEdge: 28,
@@ -924,7 +940,7 @@ export const gameConfig = {
         statValueFontSize: 14,
         driveFontSize: 32,
         titleColor: '#ffffff',
-        titleAccentColor: '#129eff',
+        titleAccentColor: '#e2202e',
         descriptionColor: '#f0f3f6',
         headerGradientLeft: '#03070b',
         headerGradientCenter: '#0b2639',
@@ -933,11 +949,11 @@ export const gameConfig = {
         statLabelColor: '#f7f8fa',
         statValueColor: '#ffffff',
         statTrackColor: '#818080',
-        statFillColor: '#31c9f5',
+        statFillColor: '#e2202e',
         driveColor: '#ffffff',
-        driveGradientTop: '#118ded',
-        driveGradientBottom: '#0756b8',
-        driveStroke: '#27bafc',
+        driveGradientTop: '#e2202e',
+        driveGradientBottom: '#7e1219',
+        driveStroke: '#4f0b10',
         driveShadowColor: '#00111dcc',
         stats: {
             speedLabel: 'TOP SPEED',
@@ -984,7 +1000,7 @@ export const gameConfig = {
                 color: 0x18242f,
                 roughness: 0.28,
                 metalness: 0.62,
-                rimColor: 0x4bd9ff,
+                rimColor: 0xffffff,
                 floorColor: 0x070b10,
                 wallColor: 0x09131e,
             },
@@ -1522,7 +1538,7 @@ export const gameConfig = {
         heightMax: 16,
         trunkRadiusK: 0.035,
         canopyRadiusK: 0.30,
-        tiersMin: 2,
+        tiersMin: 3,
         tiersMax: 4,
         trunkSegments: 5,
         canopySegments: 6,
@@ -1551,9 +1567,9 @@ export const gameConfig = {
          * cool blue, so the unlit side drifts blue, and holding blue back in the
          * albedo is what keeps the olive reading in shadow as well as in light.
          */
-        trunkColor: 0x5c4a42,
-        foliageLowColor: 0x485b38,
-        foliageHighColor: 0xa4aa58,
+        trunkColor: 0x885c43,
+        foliageLowColor: 0x37622a,
+        foliageHighColor: 0x71b53a,
 
         /** Average metres between placement candidates, before rejection. */
         spacing: 18,
@@ -1625,6 +1641,44 @@ export const gameConfig = {
         maxFarInstances: 700,
         /** Sunk slightly so the trunk grows out of the ground, not onto it. */
         sinkDepth: 0.25,
+
+        /**
+         * Broadleaf variant shape knobs, kept for `procedural/treeBroadleaf.ts`
+         * even though nothing currently instantiates it — see that file's own
+         * header comment. Trunk/foliage colour and `variants`' shared height
+         * range come from the fields above so it would read as part of the same
+         * forest if re-enabled.
+         */
+        broadleaf: {
+            variants: 2,
+            trunkRadiusK: 0.032,
+            /** Portion of total height the straight trunk climbs before branching. */
+            trunkHeightMinK: 0.5,
+            trunkHeightMaxK: 0.66,
+            /** Short angled stubs breaking up the silhouette below the canopy. */
+            branchCountMin: 1,
+            branchCountMax: 2,
+            branchLengthMinK: 0.16,
+            branchLengthMaxK: 0.26,
+            /** Tilt off vertical, radians — 35-55 degrees. */
+            branchTiltMin: 0.61,
+            branchTiltMax: 0.96,
+            /** Overall canopy envelope radius, as a fraction of total height. */
+            canopyRadiusK: 0.34,
+            /**
+             * The canopy is ONE icosahedron (`canopyDetail` subdivisions) with
+             * each vertex pushed in/out along its own radius by a random factor
+             * in this range — a single deformed blob reading as an irregular,
+             * clumped mass instead of the conifer's clean radial cones, but
+             * still one shape (not several overlapping ones) merged with the
+             * trunk/branches into the tree's one mesh.
+             */
+            canopyDetail: 1,
+            canopyJitterMin: 0.75,
+            canopyJitterMax: 1.2,
+            /** Flattens the blob vertically so it reads as a canopy, not a ball. */
+            canopySquashY: 0.82,
+        },
     },
 
     /** Sparse low-poly scenery used by the desert biome. */

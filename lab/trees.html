@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deciduous tree FBX lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #8ccde7; }
+    canvas { display: block; }
+    #panel {
+      position: fixed; z-index: 2; top: 16px; left: 16px; width: min(300px, calc(100vw - 32px));
+      padding: 14px; border: 1px solid rgb(255 255 255 / 34%); border-radius: 12px;
+      background: rgb(17 31 45 / 76%); color: #f1f7fa; box-shadow: 0 10px 30px rgb(10 28 42 / 22%);
+      backdrop-filter: blur(9px); font-size: 13px;
+    }
+    h1 { margin: 0 0 6px; font-size: 16px; }
+    p { margin: 0 0 12px; color: #d0e2eb; line-height: 1.35; }
+    label { display: grid; gap: 5px; margin-top: 10px; color: #deedf3; }
+    input { width: 100%; accent-color: #f6fbff; }
+    .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .toggle input { width: auto; margin: 0; }
+    output { color: #fff; font-variant-numeric: tabular-nums; }
+    #stats { margin-top: 13px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 17%); color: #d0e2eb; line-height: 1.5; }
+    #stats strong { color: #fff; }
+    #help { position: fixed; z-index: 2; bottom: 16px; left: 16px; color: #effaff; font-size: 12px; text-shadow: 0 1px 2px #244355; }
+    @media (max-width: 580px) { #panel { width: 250px; } #help { display: none; } }
+  </style>
+</head>
+
+<body>
+  <section id="panel">
+    <h1>Deciduous tree FBX lab</h1>
+    <p>The five trees from <code>reference/Deciduous_Trees</code>, side by side. The pack's gradient texture isn't bundled, so a stand-in bark→leaf ramp is generated here and mapped through each mesh's own UVs.</p>
+    <label class="toggle"><input id="wireframe" type="checkbox" /> Show wireframe</label>
+    <label class="toggle"><input id="labels" type="checkbox" checked /> Show labels</label>
+    <label class="toggle"><input id="ground" type="checkbox" checked /> Show ground</label>
+    <label>Spacing <output id="spacing-value"></output>
+      <input id="spacing" type="range" min="2.5" max="7" value="4.2" step="0.1" />
+    </label>
+    <label>Scale <output id="scale-value"></output>
+      <input id="scale" type="range" min="0.5" max="2" value="1" step="0.05" />
+    </label>
+    <div id="stats">Loading trees…</div>
+  </section>
+  <div id="help">Drag to orbit · Scroll/pinch to zoom · Right-drag to pan</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+    const TREES = [
+      { file: 'Tree_average_bare.fbx', label: 'Average · Bare' },
+      { file: 'Tree_average_lush.fbx', label: 'Average · Lush' },
+      { file: 'Tree_average_regular.fbx', label: 'Average · Regular' },
+      { file: 'Tree_small_bare.fbx', label: 'Small · Bare' },
+      { file: 'Tree_small_regular.fbx', label: 'Small · Regular' },
+    ];
+    const TREE_DIR = '../reference/Deciduous_Trees/';
+
+    const elements = {
+      wireframe: document.querySelector('#wireframe'),
+      labels: document.querySelector('#labels'),
+      ground: document.querySelector('#ground'),
+      spacing: document.querySelector('#spacing'),
+      scale: document.querySelector('#scale'),
+      stats: document.querySelector('#stats'),
+    };
+    const outputs = {
+      spacing: document.querySelector('#spacing-value'),
+      scale: document.querySelector('#scale-value'),
+    };
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x8ccde7);
+
+    const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.05, 300);
+    camera.position.set(9, 7, 15);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.append(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 2, 0);
+    controls.enableDamping = true;
+    controls.minDistance = 3;
+    controls.maxDistance = 45;
+    controls.maxPolarAngle = Math.PI * 0.49;
+
+    scene.add(new THREE.HemisphereLight(0xe9f8ff, 0x46512b, 2.2));
+    const sun = new THREE.DirectionalLight(0xfff5e7, 3.0);
+    sun.position.set(-10, 16, 9);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -16;
+    sun.shadow.camera.right = 16;
+    sun.shadow.camera.top = 16;
+    sun.shadow.camera.bottom = -16;
+    scene.add(sun);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ color: 0x6f9a5a, roughness: 1 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    const grid = new THREE.GridHelper(80, 40, 0x4c6b3c, 0x5a7a48);
+    grid.position.y = 0.002;
+    scene.add(grid);
+
+    // The pack's own texture_gradient.png isn't bundled with the reference
+    // FBXs, and every mesh's UVs assume it — a 1D bark-to-leaf ramp sampled by
+    // vertical position. Reproducing that ramp here is what turns the trees
+    // from flat grey into something readable, without needing the original file.
+    function createGradientTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+      gradient.addColorStop(0.00, '#4a3524');
+      gradient.addColorStop(0.16, '#6b4a2c');
+      gradient.addColorStop(0.36, '#5c6b2f');
+      gradient.addColorStop(0.60, '#4f7a34');
+      gradient.addColorStop(0.82, '#6fa83f');
+      gradient.addColorStop(1.00, '#9fd35c');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+      return texture;
+    }
+    const gradientTexture = createGradientTexture();
+
+    function makeLabel(text) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgb(12 20 28 / 80%)';
+      ctx.beginPath();
+      ctx.roundRect(4, 12, 248, 40, 10);
+      ctx.fill();
+      ctx.font = '600 24px Inter, ui-sans-serif, sans-serif';
+      ctx.fillStyle = '#f1f7fa';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 128, 33);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
+      sprite.scale.set(2.4, 0.6, 1);
+      sprite.renderOrder = 999;
+      return sprite;
+    }
+
+    function triangleCount(object) {
+      let total = 0;
+      object.traverse((node) => {
+        if (!node.isMesh) return;
+        const geometry = node.geometry;
+        total += geometry.index ? geometry.index.count / 3 : geometry.getAttribute('position').count / 3;
+      });
+      return total;
+    }
+
+    const trees = [];
+    const loader = new FBXLoader();
+
+    async function loadTree(entry) {
+      const model = await loader.loadAsync(`${TREE_DIR}${entry.file}`);
+      model.traverse((object) => {
+        if (!object.isMesh) return;
+        const hadArray = Array.isArray(object.material);
+        const materials = hadArray ? object.material : [object.material];
+        const converted = materials.map(() => new THREE.MeshStandardMaterial({
+          map: gradientTexture, roughness: 0.88, metalness: 0,
+        }));
+        object.material = hadArray ? converted : converted[0];
+        object.castShadow = true;
+        object.receiveShadow = true;
+      });
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      model.position.y -= box.min.y;
+
+      const labelSprite = makeLabel(entry.label);
+      labelSprite.position.y = size.y + 0.5;
+
+      const group = new THREE.Group();
+      group.add(model, labelSprite);
+      scene.add(group);
+      trees.push({ group, labelSprite, height: size.y, triangles: triangleCount(model), name: entry.label });
+    }
+
+    function layout() {
+      const spacing = Number(elements.spacing.value);
+      const scale = Number(elements.scale.value);
+      const n = trees.length;
+      trees.forEach((tree, i) => {
+        const x = (i - (n - 1) / 2) * spacing;
+        tree.group.position.x = x;
+        tree.group.scale.setScalar(scale);
+        tree.labelSprite.position.y = (tree.height + 0.5) * scale;
+      });
+      outputs.spacing.value = spacing.toFixed(1);
+      outputs.scale.value = `${scale.toFixed(2)}×`;
+    }
+
+    function setWireframe(enabled) {
+      for (const tree of trees) {
+        tree.group.traverse((object) => {
+          if (!object.isMesh) return;
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+            material.wireframe = enabled;
+          }
+        });
+      }
+    }
+
+    function setLabelsVisible(visible) {
+      for (const tree of trees) tree.labelSprite.visible = visible;
+    }
+
+    async function loadAll() {
+      let loaded = 0;
+      for (const entry of TREES) {
+        elements.stats.textContent = `Loading trees… ${loaded}/${TREES.length}`;
+        await loadTree(entry).catch((error) => {
+          console.error(`Failed to load ${entry.file}`, error);
+        });
+        loaded += 1;
+      }
+      layout();
+      setWireframe(elements.wireframe.checked);
+      setLabelsVisible(elements.labels.checked);
+      elements.stats.innerHTML = trees
+        .map((tree) => `${tree.name}: <strong>${tree.triangles} tris</strong>, ${tree.height.toFixed(2)} m tall`)
+        .join('<br>');
+    }
+
+    elements.wireframe.addEventListener('change', () => setWireframe(elements.wireframe.checked));
+    elements.labels.addEventListener('change', () => setLabelsVisible(elements.labels.checked));
+    elements.ground.addEventListener('change', () => {
+      ground.visible = grid.visible = elements.ground.checked;
+    });
+    elements.spacing.addEventListener('input', layout);
+    elements.scale.addEventListener('input', layout);
+
+    loadAll();
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+
+</html>

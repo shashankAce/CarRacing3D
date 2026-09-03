@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Low-poly snow mountain lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; overflow: hidden; background: #8ccde7; }
+    canvas { display: block; }
+    #panel {
+      position: fixed; z-index: 1; top: 16px; left: 16px; width: min(290px, calc(100vw - 32px));
+      padding: 14px; border: 1px solid rgb(255 255 255 / 34%); border-radius: 12px;
+      background: rgb(17 31 45 / 76%); color: #f1f7fa; box-shadow: 0 10px 30px rgb(10 28 42 / 22%);
+      backdrop-filter: blur(9px); font-size: 13px;
+    }
+    h1 { margin: 0 0 6px; font-size: 16px; }
+    p { margin: 0 0 12px; color: #d0e2eb; line-height: 1.35; }
+    label { display: grid; gap: 5px; margin-top: 10px; color: #deedf3; }
+    input { width: 100%; accent-color: #f6fbff; }
+    .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .toggle input { width: auto; margin: 0; }
+    output { color: #fff; font-variant-numeric: tabular-nums; }
+    #help { position: fixed; z-index: 1; bottom: 16px; left: 16px; color: #effaff; font-size: 12px; text-shadow: 0 1px 2px #244355; }
+    @media (max-width: 580px) { #panel { width: 250px; } #help { display: none; } }
+  </style>
+</head>
+
+<body>
+  <section id="panel">
+    <h1>Low-poly snow mountain</h1>
+    <p>Faceted grey rock with an uneven white snow cap, inspired by the distant range in the reference.</p>
+    <label>Snow coverage <output id="snow-value"></output>
+      <input id="snow" type="range" min="35" max="75" value="55" step="1" />
+    </label>
+    <label>Mountain height <output id="height-value"></output>
+      <input id="height" type="range" min="18" max="42" value="30" step="1" />
+    </label>
+    <label>Polygon sides <output id="segments-value"></output>
+      <input id="segments" type="range" min="5" max="24" value="11" step="1" />
+    </label>
+    <label class="toggle"><input id="wireframe" type="checkbox" /> Show wireframe</label>
+  </section>
+  <div id="help">Drag to orbit · Scroll/pinch to zoom · Right-drag to pan</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const snowInput = document.querySelector('#snow');
+    const heightInput = document.querySelector('#height');
+    const segmentsInput = document.querySelector('#segments');
+    const wireframeInput = document.querySelector('#wireframe');
+    const snowValue = document.querySelector('#snow-value');
+    const heightValue = document.querySelector('#height-value');
+    const segmentsValue = document.querySelector('#segments-value');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x91cfe7);
+    scene.fog = new THREE.Fog(0x91cfe7, 65, 155);
+
+    const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
+    camera.position.set(42, 24, 49);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.18;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.append(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 11, 0);
+    controls.enableDamping = true;
+    controls.minDistance = 26;
+    controls.maxDistance = 115;
+    controls.maxPolarAngle = Math.PI * 0.48;
+
+    scene.add(new THREE.HemisphereLight(0xe9f8ff, 0x46515b, 2.4));
+    const sun = new THREE.DirectionalLight(0xfff5e7, 3.1);
+    sun.position.set(-28, 43, 22);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -55;
+    sun.shadow.camera.right = 55;
+    sun.shadow.camera.top = 55;
+    sun.shadow.camera.bottom = -55;
+    scene.add(sun);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(260, 260),
+      new THREE.MeshStandardMaterial({ color: 0x7f9a9e, roughness: 1 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Tiny deterministic PRNG: each rebuild keeps the same mountain silhouette.
+    function random(seed) {
+      let value = seed >>> 0;
+      return () => {
+        value += 0x6d2b79f5;
+        let t = value;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function color(hex, factor) {
+      return new THREE.Color(hex).multiplyScalar(factor);
+    }
+
+    function makeMountain({ radius, height, seed, snowStart, segments }) {
+      const rand = random(seed);
+      // Increase both around-the-mountain sides and up-the-mountain rings.
+      // More sides therefore means genuinely denser, smoother geometry.
+      const ringCount = Math.max(4, Math.round(segments * 0.65));
+      const profile = [
+        [1, 0], [0.84, 0.16], [0.63, 0.40], [0.39, 0.66], [0.17, 0.87], [0.015, 1],
+      ];
+      const radii = Array.from({ length: segments }, () => 0.82 + rand() * 0.28);
+      const angles = Array.from({ length: segments }, (_, i) => i / segments * Math.PI * 2 + (rand() - 0.5) * 0.12);
+      const positions = [];
+      const indices = [];
+      const bands = [];
+
+      function profileAt(t) {
+        const scaled = Math.min(t, 1) * (profile.length - 1);
+        const lower = Math.floor(scaled);
+        const upper = Math.min(lower + 1, profile.length - 1);
+        const blend = scaled - lower;
+        return [
+          THREE.MathUtils.lerp(profile[lower][0], profile[upper][0], blend),
+          THREE.MathUtils.lerp(profile[lower][1], profile[upper][1], blend),
+        ];
+      }
+
+      for (let ring = 0; ring < ringCount; ring += 1) {
+        const t = ring / ringCount;
+        const [radiusRatio, heightRatio] = profileAt(t);
+        for (let i = 0; i < segments; i += 1) {
+          const angle = angles[i];
+          // A few broad, deterministic waves create ridges, dips and small
+          // saddles. They are continuous around the mountain, unlike per-face
+          // random values that would turn into visible stripes at high detail.
+          const broadLump = Math.sin(angle * 3 + seed * 0.17) * 0.11
+            + Math.sin(angle * 5 - seed * 0.09) * 0.045;
+          const verticalLump = Math.sin(angle * 2.2 + ring * 1.37 + seed * 0.31) * 0.075;
+          const taper = Math.sin(t * Math.PI);
+          const radiusLump = 1 + broadLump * (0.35 + taper * 0.65);
+          const ridge = 1 + verticalLump * taper;
+          positions.push(
+            Math.cos(angle) * radius * radiusRatio * radii[i] * radiusLump,
+            height * heightRatio * ridge,
+            Math.sin(angle) * radius * radiusRatio * radii[i] * radiusLump,
+          );
+        }
+      }
+
+      // One actual apex vertex prevents a split crown at the peak.
+      const apex = positions.length / 3;
+      positions.push(0, height, 0);
+
+      for (let ring = 0; ring < ringCount - 1; ring += 1) {
+        const start = indices.length;
+        for (let i = 0; i < segments; i += 1) {
+          const next = (i + 1) % segments;
+          const a = ring * segments + i;
+          const b = ring * segments + next;
+          const c = (ring + 1) * segments + i;
+          const d = (ring + 1) * segments + next;
+          indices.push(a, c, b, b, c, d);
+        }
+        // Each snow band covers the complete ring around the mountain.
+        bands.push({ start, count: indices.length - start, snow: (ring + 0.5) / ringCount >= snowStart });
+      }
+      const peakStart = indices.length;
+      for (let i = 0; i < segments; i += 1) {
+        const next = (i + 1) % segments;
+        indices.push((ringCount - 1) * segments + i, apex, (ringCount - 1) * segments + next);
+      }
+      bands.push({ start: peakStart, count: indices.length - peakStart, snow: true });
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+
+      const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x77818c, roughness: 0.92, flatShading: segments <= 9 });
+      const snowMaterial = new THREE.MeshStandardMaterial({ color: 0xe6eef1, roughness: 0.82, flatShading: segments <= 9 });
+      for (const band of bands) geometry.addGroup(band.start, band.count, band.snow ? 1 : 0);
+
+      const group = new THREE.Group();
+      const rockMesh = new THREE.Mesh(geometry, [rockMaterial, snowMaterial]);
+      rockMesh.castShadow = rockMesh.receiveShadow = true;
+      group.add(rockMesh);
+      return group;
+    }
+
+    const range = new THREE.Group();
+    scene.add(range);
+
+    function setWireframe(enabled) {
+      range.traverse((object) => {
+        if (!object.isMesh) return;
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+          material.wireframe = enabled;
+        }
+      });
+    }
+
+    function rebuild() {
+      range.clear();
+      const height = Number(heightInput.value);
+      const snowStart = Number(snowInput.value) / 100;
+      const segments = Number(segmentsInput.value);
+      const main = makeMountain({ radius: 21, height, seed: 48, snowStart, segments });
+      main.position.set(0, 0, 0);
+      const left = makeMountain({ radius: 14, height: height * 0.59, seed: 109, snowStart: Math.min(snowStart + 0.08, 0.82), segments });
+      left.position.set(-23, -0.2, 7);
+      const right = makeMountain({ radius: 16, height: height * 0.68, seed: 236, snowStart: Math.min(snowStart + 0.05, 0.80), segments });
+      right.position.set(25, -0.15, 12);
+      range.add(left, main, right);
+      setWireframe(wireframeInput.checked);
+      snowValue.textContent = `${snowInput.value}%`;
+      heightValue.textContent = `${height} m`;
+      segmentsValue.textContent = `${segments}`;
+    }
+
+    snowInput.addEventListener('input', rebuild);
+    heightInput.addEventListener('input', rebuild);
+    segmentsInput.addEventListener('input', rebuild);
+    wireframeInput.addEventListener('change', () => setWireframe(wireframeInput.checked));
+    rebuild();
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    renderer.setAnimationLoop(() => {
+      controls.update();
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+
+</html>

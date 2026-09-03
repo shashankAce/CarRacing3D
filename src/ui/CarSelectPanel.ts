@@ -93,6 +93,7 @@ export class CarSelectPanel {
         this._name.fontWeight = 800;
         this._name.fontFamily = 'rajdhani_bold';
         this._name.fontStyle = 'italic';
+        this._name.letterSpacing = 5;
 
         this._description = this._makeLabel(
             this._statsContainer,
@@ -223,6 +224,8 @@ export class CarSelectPanel {
         title.text = c.title;
         title.fontFamily = 'rajdhani_bold';
         title.fontStyle = 'italic';
+        title.letterSpacing = 5;
+
         const accent = this._makeLabel(
             header,
             c.titleAccentX,
@@ -233,6 +236,8 @@ export class CarSelectPanel {
         accent.text = c.titleAccent;
         accent.fontFamily = 'rajdhani_bold';
         accent.fontStyle = 'italic';
+        accent.letterSpacing = 5;
+
     }
 
     private _makeNameAccent(): void {

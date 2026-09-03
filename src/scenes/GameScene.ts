@@ -488,6 +488,7 @@ export class GameScene extends Scene {
             await Promise.all([
                 this._vehicleModels.load((stage, progress) => this._setLoadingProgress(stage, progress)),
                 this._carSelect?.loadAssets(),
+                this._gameOver.loadAssets(),
             ]);
             this._traffic.attachModels(this._vehicleModels);
             this._traffic.refreshProjectedGeometry(this._projected);
