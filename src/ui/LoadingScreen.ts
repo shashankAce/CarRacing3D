@@ -4,10 +4,18 @@ import { gameConfig as cfg } from '../config/gameConfig';
 export type LoadingStage = 'assets' | 'compile' | 'world' | 'shadows';
 
 const LOADING_BACKGROUND_ALIAS = 'loading-background';
+const CHEVRON_ALIAS = 'car-select:chevron';
+const STAT_ICON_ALIASES = [
+    'car-select:top-speed',
+    'car-select:acceleration',
+    'car-select:braking',
+] as const;
 
 /** Full-screen startup overlay driven only by real loading milestones. */
 export class LoadingScreen {
 
+    /** Resolves once every UI asset (fonts, showroom art, this screen's own art) is cached. */
+    readonly ready: Promise<void>;
     private _backdrop: Node;
     private _backgroundImage: Node;
     private _backgroundSprite: Sprite;
@@ -53,7 +61,7 @@ export class LoadingScreen {
         scene.addChild(this._fill);
 
         this.setProgress('assets', 0, 0);
-        void this._preloadAssets();
+        this.ready = this._preloadAssets();
     }
 
     setProgress(stage: LoadingStage, stageProgress: number, overallProgress: number): void {
@@ -92,6 +100,7 @@ export class LoadingScreen {
         // this._status.node.active = false;
     }
 
+    /** Every UI asset the game needs is loaded once, here, before anything else runs. */
     private async _preloadAssets(): Promise<void> {
         await assetCache.preloadAssets([
             // Keep the source literal in this preload entry: the playable packer
@@ -100,11 +109,15 @@ export class LoadingScreen {
             // Kept explicit so production asset trimming retains the atlas page
             // referenced by the BMFont descriptor.
             { src: 'res/MonsterRacing.png', type: 'image' },
+            { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
+            { src: 'res/right-chevron.png', type: 'image', alias: CHEVRON_ALIAS },
+            { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
+            { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
+            { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
+            { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
+            { src: 'res/fontTTF/rajdhani-light.ttf', type: 'font', fontName: 'rajdhani_light', alias: 'rajdhani_light' },
+            { src: 'res/fontTTF/rajdhani-semibold.ttf', type: 'font', fontName: 'rajdhani_semibold', alias: 'rajdhani_semibold' },
         ]);
         this._backgroundSprite.texture = assetCache.getAsset(LOADING_BACKGROUND_ALIAS);
-        // The car-select title uses this font after the loading screen closes.
-        await assetCache.preloadAssets([
-            { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
-        ]);
     }
 }

@@ -1,4 +1,4 @@
-import { ColorRect, Graphics, Input, Label, Node, Scene, Sprite, assetCache } from 'noonengine';
+import { ColorRect, Graphics, Input, Label, Node, Scene, Sprite } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 /**
@@ -73,14 +73,6 @@ export class GameOverPanel {
         tagline.letterSpacing = e.taglineLetterSpacing;
 
         this._root.active = false;
-    }
-
-    /** Loads the game's UI font — reused from the car-select screen (may already be cached). */
-    async loadAssets(): Promise<void> {
-        await assetCache.preloadAssets([
-            { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
-            { src: 'res/fontTTF/rajdhani-semibold.ttf', type: 'font', fontName: 'rajdhani_semibold', alias: 'rajdhani_semibold' },
-        ]);
     }
 
     get isVisible(): boolean { return this._root.active; }

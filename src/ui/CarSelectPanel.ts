@@ -134,17 +134,8 @@ export class CarSelectPanel {
 
     get selectedId(): VehicleModelId { return cfg.vehicles.models[this._index].id; }
 
-    /** Loads only file-backed showroom UI art; procedural gradients need no preload. */
-    async loadAssets(): Promise<void> {
-        await assetCache.preloadAssets([
-            { src: 'res/right-chevron.png', type: 'image', alias: CHEVRON_ALIAS },
-            { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
-            { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
-            { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
-            { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
-            { src: 'res/fontTTF/rajdhani-light.ttf', type: 'font', fontName: 'rajdhani_light', alias: 'rajdhani_light' },
-            { src: 'res/fontTTF/rajdhani-semibold.ttf', type: 'font', fontName: 'rajdhani_semibold', alias: 'rajdhani_semibold' },
-        ]);
+    /** Assigns showroom UI art already preloaded by LoadingScreen. */
+    applyLoadedAssets(): void {
         const chevron = assetCache.getAsset(CHEVRON_ALIAS);
         for (const sprite of this._arrowSprites) sprite.texture = chevron;
         for (let i = 0; i < this._statIcons.length; i++) {
