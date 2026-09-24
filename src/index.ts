@@ -1,5 +1,5 @@
-import * as THREE from 'three';
 import { GameEngine, createPlatform, ResolutionPolicy, RendererType, InspectorOverlay } from 'noonengine';
+import { ThreeSceneSystem } from 'noonengine/3d';
 import { gameConfig as cfg } from './config/gameConfig';
 import { GameScene } from './scenes/GameScene';
 import { installFogCurve } from './procedural/fogCurve';
@@ -35,7 +35,7 @@ const engine = new GameEngine({
     // 3D is WebGL-only — Canvas/WebGPU are guarded off with an explicit error.
     renderType: RendererType.WEBGL,
     enable3D: true,
-    three: THREE,
+    sceneSystem3D: ThreeSceneSystem,
     // Caps devicePixelRatio rather than following it. See ARCHITECTURE.md §2.4.
     pixelRatio: cfg.render.pixelRatioCap,
     resolutionScale: cfg.render.resolutionScale,

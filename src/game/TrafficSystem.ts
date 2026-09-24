@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Node, Group3D, Scene } from 'noonengine';
+import { Node, Scene } from 'noonengine';
+import { Group3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadHeadingAt } from '../world/roadPath';
 import { surfaceHeightAt } from '../procedural/heightField';

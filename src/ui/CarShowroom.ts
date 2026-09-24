@@ -3,7 +3,7 @@ import type { Scene } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { VehicleModels, VehicleModelId, VehicleVisual } from '../assets/VehicleModels';
 
-type ThreeSystem = NonNullable<Scene['threeSceneSystem']>;
+type ThreeSystem = NonNullable<Scene['sceneSystem3D']>;
 type ShowroomCamera = THREE.PerspectiveCamera | THREE.OrthographicCamera;
 
 interface PreviewCar {

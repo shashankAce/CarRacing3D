@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Scene, Node, AmbientLight3D, DirectionalLight3D } from 'noonengine';
+import { Scene, Node } from 'noonengine';
+import { AmbientLight3D, DirectionalLight3D, ThreeSceneSystem } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { GameState } from '../game/GameState';
 import { TrafficSystem } from '../game/TrafficSystem';
@@ -50,7 +51,7 @@ import {
  *
  * Engine rules that shape this file, all from ARCHITECTURE.md §3:
  *  - Everything is built in `onLoad()`. A node added in the constructor enters
- *    the tree before `threeSceneSystem` exists, and its 3D components silently
+ *    the tree before `sceneSystem3D` exists, and its 3D components silently
  *    no-op — no error, just nothing rendered.
  *  - `addChild()` comes before any transform set; `onEnable()` is what creates
  *    the underlying THREE object.
@@ -109,8 +110,8 @@ export class GameScene extends Scene {
     onLoad(): void {
         // Idempotent — the engine config already ran this, but calling it here
         // keeps the scene correct even if that flag is ever dropped.
-        this._initThree(THREE);
-        const sys = this.threeSceneSystem;
+        this._init3D(ThreeSceneSystem);
+        const sys = this.sceneSystem3D;
 
         // Both derived from the dome's own horizon, so distant terrain fades
         // into exactly the colour the sky shows behind it at any sun angle.
@@ -433,8 +434,8 @@ export class GameScene extends Scene {
         this._lastEnvironmentBlend = blend;
         this._sky.refreshEnvironment(blend);
         const horizon = effectiveHorizonColor(blend);
-        this.threeSceneSystem.scene.background = horizon;
-        const fog = this.threeSceneSystem.scene.fog;
+        this.sceneSystem3D.scene.background = horizon;
+        const fog = this.sceneSystem3D.scene.fog;
         if (fog instanceof THREE.FogExp2) fog.color.copy(horizon);
     }
 

@@ -129,8 +129,8 @@ Source: `skills/3d/three-integration.md`, `skills/scenes/creating-a-scene.md`,
    2D node tree is automatically a HUD layer on top of the 3D scene, in the
    same `Scene`, via the same `addChild`. No compositing work needed.
 2. **Build everything in `onLoad()`, never the constructor.** `runScene()`
-   sizes the root node and runs `_initThree()` *before* `onLoad()`. A node added
-   in the constructor enters the tree before `threeSceneSystem` exists, and any
+   sizes the root node and runs `_init3D()` *before* `onLoad()`. A node added
+   in the constructor enters the tree before `sceneSystem3D` exists, and any
    3D wrapper's `onEnable()` **silently no-ops** — no error, just nothing renders.
 3. **`addChild()` before setting transforms.** `onEnable()` is what lazily
    creates the underlying THREE object; `cam.position.set(...)` before

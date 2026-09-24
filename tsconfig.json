@@ -16,6 +16,15 @@
     "paths": {
       "noonengine": [
         "./engine/lib/index.js"
+      ],
+      "noonengine/3d": [
+        "./engine/lib/3d/index.js"
+      ],
+      "#3d-backend/*": [
+        "./engine/lib/3d/backends/three/*"
+      ],
+      "#3d-renderer": [
+        "./engine/lib/3d/backends/three/renderer.webgl.js"
       ]
     }
   },

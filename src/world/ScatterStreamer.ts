@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Node, InstancedMesh3D, Scene } from 'noonengine';
+import { Node, Scene } from 'noonengine';
+import { InstancedMesh3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { createTreeGeometry, createTreeMaterial, type TreeVariant } from '../procedural/tree';
 import { bakeTreeImpostor, impostorFrameSize } from '../procedural/treeImpostor';

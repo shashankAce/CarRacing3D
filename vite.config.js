@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { defineConfig } from 'vite';
+import { defineConfig, defaultClientConditions } from 'vite';
 
 // Loads .glsl / .vert / .frag / .wgsl files as plain string default exports —
 // inlined here (not imported from noonengine/bin/) so this file works
@@ -23,6 +23,12 @@ function glslPlugin() {
 // the vendored copy instead of node_modules, and pull the roller helpers from
 // there too (they were copied alongside lib/ for exactly this reason).
 const VENDORED = fs.existsSync(path.resolve('./engine'));
+
+// Opt into the experimental WebGPU 3D backend: `NOON_3D_WEBGPU=1 npm run build`.
+// On an npm install this is a resolve condition the engine's package.json
+// `imports` map reads; on a vendored engine (no package.json of its own) it
+// picks the aliased variants by hand instead. See docs/BUILD_PIPELINE.md.
+const NOON_3D_WEBGPU = Boolean(process.env.NOON_3D_WEBGPU);
 
 // Host platform this build targets — normally set for you by
 // `npx noonengine pack --platform=<name>`, which exports it before invoking
@@ -158,7 +164,26 @@ export default defineConfig(async ({ command, mode }) => {
         },
         publicDir: false,
         resolve: {
-            alias: VENDORED ? { noonengine: path.resolve('./engine/lib/index.js') } : undefined,
+            // A vendored engine has no package.json of its own, so the `exports`/
+            // `imports` maps that resolve `noonengine/3d` and the `#3d-backend/*` /
+            // `#3d-renderer` / `#three` seams in an npm install aren't available —
+            // alias them by hand instead. `#3d-renderer` and `#three` are the two
+            // graphics-API-specific entries: point them at the `.webgpu` /
+            // `three/webgpu` variants to build the experimental WebGPU 3D backend
+            // (the npm-install equivalent is adding the `noonengine-3d-webgpu`
+            // resolve condition — see docs/BUILD_PIPELINE.md).
+            alias: VENDORED ? {
+                'noonengine/3d': path.resolve('./engine/lib/3d/index.js'),
+                'noonengine': path.resolve('./engine/lib/index.js'),
+                '#3d-backend': path.resolve('./engine/lib/3d/backends/three'),
+                '#3d-renderer': path.resolve(NOON_3D_WEBGPU
+                    ? './engine/lib/3d/backends/three/renderer.webgpu.js'
+                    : './engine/lib/3d/backends/three/renderer.webgl.js'),
+                '#three': NOON_3D_WEBGPU ? 'three/webgpu' : 'three',
+            } : undefined,
+            conditions: (!VENDORED && NOON_3D_WEBGPU)
+                ? [...defaultClientConditions, 'noonengine-3d-webgpu']
+                : undefined,
         },
         optimizeDeps: {
             // See bin/vite-optimize-deps.js's header comment for why each of

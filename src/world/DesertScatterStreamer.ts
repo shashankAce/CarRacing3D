@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { InstancedMesh3D, Node, Scene } from 'noonengine';
+import { Node, Scene } from 'noonengine';
+import { InstancedMesh3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { createDesertProp, createDesertPropMaterial, type DesertPropVariant } from '../procedural/desertProp';
 import { heightAt, normalAt } from '../procedural/heightField';

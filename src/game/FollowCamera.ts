@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Node, Camera3D, Scene } from 'noonengine';
+import { Node, Scene } from 'noonengine';
+import { Camera3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { PlayerCar } from './PlayerCar';
 
