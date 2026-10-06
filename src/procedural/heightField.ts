@@ -258,3 +258,27 @@ export function normalAt(x: number, z: number, out: { x: number; y: number; z: n
     out.y = 1 / len;
     out.z = -dz / len;
 }
+
+/**
+ * Analytic surface normal of the DRIVABLE surface (`surfaceHeightAt`), in
+ * WORLD space, written into `out`. Sibling of `normalAt`, which reads the
+ * terrain mesh instead — anything resting on the drivable surface (the ride
+ * overlay, the ride telemetry) must judge its tilt against this.
+ *
+ * The z component is world-space; negate it for a render-space frame that
+ * mirrors Z (see `normalAt`'s note for why that flip is mandatory).
+ */
+export function surfaceNormalAt(
+    x: number, z: number,
+    out: { x: number; y: number; z: number },
+    eps = 0.2,
+): void {
+    const hL = surfaceHeightAt(x - eps, z), hR = surfaceHeightAt(x + eps, z);
+    const hD = surfaceHeightAt(x, z - eps), hU = surfaceHeightAt(x, z + eps);
+    const dx = (hR - hL) / (2 * eps);
+    const dz = (hU - hD) / (2 * eps);
+    const len = Math.sqrt(dx * dx + 1 + dz * dz);
+    out.x = -dx / len;
+    out.y = 1 / len;
+    out.z = -dz / len;
+}

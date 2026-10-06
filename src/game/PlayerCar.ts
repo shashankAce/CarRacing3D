@@ -57,6 +57,38 @@ export class PlayerCar {
     private _ridePoint = new THREE.Vector3();
     /** True while the car is pinned against a road edge. */
     private _againstEdge = false;
+    /** Rendered tyre contact points (x/z) of the current visual; empty = placeholder. */
+    private _wheelContacts: { x: number; z: number }[] = [];
+    /** Height of the rendered tyre bottoms above the origin plane; 0 for the placeholder. */
+    private _wheelBottomOffset = 0;
+
+    /**
+     * Per-frame ride telemetry for `RideDebugDraw` — the suspension's targets
+     * and actuals, the floor it solved for, and the four surface heights it
+     * sampled. Written in `update`/`reset`, read by the overlay; one object,
+     * never reallocated.
+     */
+    readonly rideDebug = {
+        yaw: 0,
+        pitch: 0,
+        pitchTarget: 0,
+        roll: 0,
+        rollTarget: 0,
+        y: 0,
+        floor: 0,
+        worldZ: 0,
+        /** Sample footprint the targets were derived from, metres. */
+        wheelX: 0,
+        axleZ: 0,
+        frontLeft: 0,
+        frontRight: 0,
+        rearLeft: 0,
+        rearRight: 0,
+        front: 0,
+        rear: 0,
+        left: 0,
+        right: 0,
+    };
 
     /** Read by the follow camera. */
     get position(): THREE.Vector3 { return this._group.position; }
@@ -71,6 +103,34 @@ export class PlayerCar {
      * sparks, whichever the design lands on.
      */
     get isAgainstEdge(): boolean { return this._againstEdge; }
+
+    /** The group's live orientation — the ride debug overlay draws the body axes from it. */
+    get bodyQuaternion(): THREE.Quaternion { return this._group.object3D.quaternion; }
+
+    /** Ground-plane tyre contacts of the set visual; empty while the placeholder is up. */
+    get wheelContacts(): { x: number; z: number }[] { return this._wheelContacts; }
+
+    /** Rendered tyre bottoms above the origin plane, metres — a baked-in float. */
+    get wheelBottomOffset(): number { return this._wheelBottomOffset; }
+
+    /**
+     * Writes [FL, FR, RL, RR] ground-plane tyre contacts into `out` — the FBX
+     * positions when a visual is set (where the rendered wheel actually
+     * touches), else the sampled footprint. Front is −Z (the game's forward).
+     * Shared by the ride overlay and the ride telemetry so the two can never
+     * disagree about which point they measured.
+     */
+    writeTyreLocals(out: number[][]): void {
+        const wheelX = this.halfWidth * 0.84;
+        const axleZ = this.halfLength * cfg.car.wheel.axleOffset;
+        out[0] = [-wheelX, -axleZ];
+        out[1] = [wheelX, -axleZ];
+        out[2] = [-wheelX, axleZ];
+        out[3] = [wheelX, axleZ];
+        for (const p of this._wheelContacts) {
+            out[(p.z < 0 ? 0 : 2) + (p.x < 0 ? 0 : 1)] = [p.x, p.z];
+        }
+    }
 
     /** Half-extents used for ground sampling and (Phase 4) collision. */
     private _projectedHandle = -1;
@@ -141,6 +201,8 @@ export class PlayerCar {
         this._materials = visual.materials;
         this._shadowGeometries = visual.shadowGeometries;
         this._spinWheels = visual.spinWheels;
+        this._wheelContacts = visual.wheelContacts;
+        this._wheelBottomOffset = visual.wheelBottomOffset;
         this._group.object3D.add(this._visual);
         this.reset();
     }
@@ -267,6 +329,18 @@ export class PlayerCar {
         const ceiling = floor + suspension.maxGroundGap;
         if (this._y > ceiling) this._y = ceiling;
 
+        // Ride telemetry for the debug overlay — every value already in hand.
+        const tel = this.rideDebug;
+        tel.yaw = this._yaw;
+        tel.pitch = this._pitch; tel.pitchTarget = targetPitch;
+        tel.roll = this._roll; tel.rollTarget = targetRoll;
+        tel.y = this._y; tel.floor = floor;
+        tel.worldZ = worldZ;
+        tel.wheelX = wheelX; tel.axleZ = axleZ;
+        tel.frontLeft = frontLeft; tel.frontRight = frontRight;
+        tel.rearLeft = rearLeft; tel.rearRight = rearRight;
+        tel.front = front; tel.rear = rear; tel.left = left; tel.right = right;
+
         const obj = this._group.object3D;
         // Roll stacks on the ground tilt. Yaw follows steering input directly;
         // roll grows with both steering amount and speed.
@@ -295,11 +369,42 @@ export class PlayerCar {
     reset(): void {
         this._x = roadCenterX(0);
         this._yaw = 0;
-        this._pitch = 0;
-        this._roll = 0;
-        this._y = this._requiredHeight(this._x, 0, 0, 0);
+
+        // Sample the road FIRST and seed the attitude from it. Pitching from 0
+        // on the road's initial ~5° grade made every run open with the body
+        // bridging flat over rising asphalt: ride telemetry measured 21cm of
+        // float and 3.4° of pitch error on the first frame, settling only after
+        // ~0.3s — the biggest single "car is flying" event of a run.
+        const wheelX = this.halfWidth * 0.84;
+        const axleZ = this.halfLength * cfg.car.wheel.axleOffset;
+        const frontLeft = this._heightAtLocal(-wheelX, -axleZ, this._x, 0);
+        const frontRight = this._heightAtLocal(wheelX, -axleZ, this._x, 0);
+        const rearLeft = this._heightAtLocal(-wheelX, axleZ, this._x, 0);
+        const rearRight = this._heightAtLocal(wheelX, axleZ, this._x, 0);
+        const front = (frontLeft + frontRight) * 0.5;
+        const rear = (rearLeft + rearRight) * 0.5;
+        const left = (frontLeft + rearLeft) * 0.5;
+        const right = (frontRight + rearRight) * 0.5;
+        this._pitch = Math.atan2(front - rear, axleZ * 2);
+        this._roll = Math.atan2(right - left, wheelX * 2);
+
+        const floor = this._requiredHeight(this._x, 0, this._pitch, this._roll);
+        this._y = floor;
         this._againstEdge = false;
         this._group.object3D.position.set(this._x, this._y, 0);
-        this._group.object3D.rotation.set(0, 0, 0, 'YXZ');
+        // Seeded attitude too — a frame rendered between reset and the first
+        // update must not show the car flat while its y was solved tilted.
+        this._group.object3D.rotation.set(this._pitch, 0, this._roll, 'YXZ');
+
+        const tel = this.rideDebug;
+        tel.yaw = 0;
+        tel.pitch = this._pitch; tel.pitchTarget = this._pitch;
+        tel.roll = this._roll; tel.rollTarget = this._roll;
+        tel.y = this._y; tel.floor = floor;
+        tel.worldZ = 0;
+        tel.wheelX = wheelX; tel.axleZ = axleZ;
+        tel.frontLeft = frontLeft; tel.frontRight = frontRight;
+        tel.rearLeft = rearLeft; tel.rearRight = rearRight;
+        tel.front = front; tel.rear = rear; tel.left = left; tel.right = right;
     }
 }

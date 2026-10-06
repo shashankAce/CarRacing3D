@@ -27,6 +27,8 @@ import { LoadingScreen, type LoadingStage } from '../ui/LoadingScreen';
 import { EnvironmentToggle } from '../ui/EnvironmentToggle';
 import { FullscreenButton } from '../ui/FullscreenButton';
 import { CollisionDebugDraw } from '../ui/CollisionDebugDraw';
+import { RideDebugDraw } from '../ui/RideDebugDraw';
+import { RideTelemetry } from '../game/RideTelemetry';
 import { SkyDome, effectiveHorizonColor } from '../procedural/sky/SkyDome';
 import { CloudSprites } from '../procedural/sky/CloudSprites';
 import { VehicleModels, type VehicleModelId } from '../assets/VehicleModels';
@@ -84,6 +86,8 @@ export class GameScene extends Scene {
     private _environmentToggle: EnvironmentToggle;
     private _fullscreenButton: FullscreenButton;
     private _collisionDebug: CollisionDebugDraw | null = null;
+    private _rideDebug: RideDebugDraw | null = null;
+    private _rideTelemetry: RideTelemetry | null = null;
     private _vehicleModels: VehicleModels;
     private _vehiclesReady = false;
     private _selectingCar = true;
@@ -174,6 +178,12 @@ export class GameScene extends Scene {
         this._traffic.deactivate();
         if (cfg.debug.collisionBox.enabled) {
             this._collisionDebug = new CollisionDebugDraw(this, sys.scene, this._car, this._traffic);
+        }
+        if (cfg.debug.rideNormals.enabled) {
+            this._rideDebug = new RideDebugDraw(this, sys.scene, this._car);
+        }
+        if (cfg.debug.rideTelemetry.enabled) {
+            this._rideTelemetry = new RideTelemetry(this._car);
         }
 
         if (cfg.lighting.projectedShadows.enabled) {
@@ -342,6 +352,11 @@ export class GameScene extends Scene {
             this._environmentToggle.setCurrent(activeEnvironment());
             // The car's world Z is `travelled` — it always renders at z ≈ 0.
             this._car.update(dt, this._input.axis, travelled, this._state.speed, this._state.speedT);
+            // Right after the car moves, so the recorded row is exactly what
+            // this frame rendered — and before collision, which may end the run.
+            this._rideTelemetry?.sample(
+                dt, this._state.speed, this._state.speedT, this._input.axis, travelled,
+            );
             this._traffic.update(dt, travelled, this._state.speedT, this._car.position.x);
 
             // Collision AFTER both have moved this frame, so neither is tested
@@ -395,6 +410,7 @@ export class GameScene extends Scene {
         this._clouds.update(dt, this._camera.position);
         this._hud.update(this._state, this._input.hasSteered, this._traffic.cuts);
         this._collisionDebug?.update();
+        this._rideDebug?.update(this._state.scroll.travelled);
         this._perf?.update(dt);
     }
 
@@ -442,6 +458,8 @@ export class GameScene extends Scene {
 
     private _endRun(title: string): void {
         this._state.end();
+        // Aggregates + NDJSON for this run, before any UI state interferes.
+        this._rideTelemetry?.endRun(title);
         this._controls.setEnabled(false);
         this._hud.setVisible(false);
         this._environmentToggle.setVisible(false);
@@ -457,6 +475,7 @@ export class GameScene extends Scene {
     }
 
     private _restart(): void {
+        this._rideTelemetry?.beginRun();
         this._paused = false;
         this._pausePanel?.hide();
         this._gameOver.hide();
@@ -681,5 +700,7 @@ export class GameScene extends Scene {
         this._carSelect?.detach();
         this._showroom?.dispose();
         this._collisionDebug?.dispose();
+        this._rideDebug?.dispose();
+        this._rideTelemetry?.dispose();
     }
 }

@@ -1101,8 +1101,14 @@ export const gameConfig = {
             heightResponse: 20,
             /** Pitch/roll response toward the plane formed by all four tyres. */
             tiltResponse: 14,
-            /** Maximum visible separation while descending before snapping down. */
-            maxGroundGap: 0.04,
+            /** Maximum visible separation while descending before snapping down.
+             *  MEASURED at 0.04: on 76% of descent frames the body sat pinned on
+             *  this ceiling (4.1cm mean gap over the ground, vs 0.9cm on
+             *  ascents), giving a persistent 4–5cm hover at speed — the
+             *  steady-state component of "the car looks flying". 0.02 halves it;
+             *  the trade is the body tracking descents ~1cm tighter, which the
+             *  analytic floor makes jitter-free. */
+            maxGroundGap: 0.02,
         },
     },
 
@@ -2035,6 +2041,92 @@ export const gameConfig = {
             labelColor: '#b8ffd3',
             labelY: 970,
             labelFontSize: 22,
+        },
+        /**
+         * Live ride telemetry for the "car floats" / "doesn't pitch with the
+         * road" hunt: finite-difference surface normals at every sampled tyre
+         * contact and along the road ahead, the plane the suspension fitted vs
+         * the body's real axes, the analytic surface the car rests on vs the
+         * chord the asphalt ribbon is actually drawn as, and a per-frame
+         * numeric readout — a single screenshot can't show damping lag or a
+         * transient gap, so the numbers have to be on screen.
+         * Flip on, drive, read; flip back off before shipping.
+         */
+        rideNormals: {
+            enabled: true,
+            /** Length of every drawn normal, metres. */
+            normalLength: 1.1,
+            /** Central-difference step for the surface gradient, metres. */
+            sampleEpsilon: 0.2,
+            /** Ground normals along the car's path: spacing, behind and ahead of it, metres. */
+            profileSpacing: 2.5,
+            profileBehind: 5,
+            profileAhead: 15,
+            /** Half-size of the cross marking an exact surface sample, metres. */
+            contactCross: 0.3,
+            /** A tyre gap at or under this reads full green. */
+            gapTolerance: 0.02,
+            /** Gap at which the green→red fade is fully red; also the ribbon-error bound. */
+            gapFull: 0.08,
+            colors: {
+                /** Analytic surface: polyline, contact crosses, all normals. */
+                surface: 0x00e5ff,
+                /** The chord the streamed asphalt ribbon is really drawn as. */
+                ribbon: 0xff8c1a,
+                /** The body's real forward/up axes, from its quaternion. */
+                body: 0xff2fd0,
+                /** The plane the suspension fitted from its four samples. */
+                fitted: 0xffe14a,
+                /** Ground line between the axles the pitch was computed from. */
+                slope: 0xffffff,
+                gapGood: 0x39ff88,
+                gapBad: 0xff3b3b,
+                /** Body plane below the drawn surface — the sink case. */
+                sunk: 0xff00ff,
+            },
+            labelColor: '#8ff4ff',
+            labelY: 1004,
+            labelFontSize: 18,
+            labelLineGap: 26,
+            /**
+             * Line-group switches, so a crowded frame can be narrowed to the one
+             * comparison being chased. The numeric labels ignore these — when the
+             * lines fight each other, trust the readout (and the telemetry log).
+             */
+            lines: {
+                /** Cyan/orange polylines along the road plus their error ticks. */
+                profile: false,
+                /** Normals at the profile stations along the road. */
+                profileNormals: false,
+                /** Contact crosses and the green/red float verticals. */
+                contactDetails: true,
+                /** Normals at the tyre contacts and the body centre. */
+                contactNormals: true,
+                /** Pink body axes and the yellow fitted-plane axis. */
+                axes: true,
+                /** White ground line between the axles. */
+                slopeLine: true,
+            },
+        },
+        /**
+         * Per-frame ride data recorder — the numbers, not the lines, are what
+         * the ride bugs get judged on. Samples every running frame, flags float
+         * and pitch-lag episodes, then at run end prints an aggregate summary to
+         * the console AND downloads an NDJSON log (`ride-telemetry-<time>.ndjson`)
+         * for offline analysis. Drop the file in the workspace to have it read.
+         */
+        rideTelemetry: {
+            enabled: true,
+            /** Hard cap on samples kept per run (~11 minutes at 60 fps). */
+            maxSamples: 40000,
+            /** Download the NDJSON when a run ends (crash or out of fuel). */
+            downloadOnRunEnd: true,
+            /** Visible gap above this (metres) opens a float episode. */
+            floatThreshold: 0.06,
+            /** Visible gap below −this (metres) opens a sink episode. */
+            sinkThreshold: 0.02,
+            /** |target − actual| pitch above this (radians) opens a lag episode. */
+            pitchLagThreshold: 0.03,
         },
         /**
          * Repaints the terrain by slope band in high-contrast colours instead of

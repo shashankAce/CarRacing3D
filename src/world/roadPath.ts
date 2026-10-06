@@ -89,3 +89,23 @@ export function roadPitchAt(worldZ: number, length: number): number {
 export function offsetFromRoadCenter(x: number, worldZ: number): number {
     return x - roadCenterX(worldZ);
 }
+
+/**
+ * Height the streamed asphalt ribbon is ACTUALLY drawn at for an absolute
+ * world Z — the chord `RoadMesh` produces, not the analytic curve.
+ *
+ * `RoadMesh` writes one vertex row every `bandLength / segmentsPerBand` metres
+ * and lets the GPU linearly interpolate between them, while `roadLevelAt` is
+ * evaluated only at those rows. The difference (up to each harmonic's chord sag,
+ * ~15–35cm at the current slopes) is real: a body resting exactly on
+ * `roadLevelAt` can visibly hover over — or sink into — the ribbon that is
+ * drawn. Kept beside `roadLevelAt` so the two definitions cannot drift apart;
+ * read by the ride debug overlay and the ride telemetry, which is exactly the
+ * "car looks like it's flying" measurement.
+ */
+export function roadRibbonYAt(worldZ: number): number {
+    const row = cfg.roadSurface.bandLength / cfg.roadSurface.segmentsPerBand;
+    const rowZ = Math.floor(worldZ / row) * row;
+    const t = (worldZ - rowZ) / row;
+    return roadLevelAt(rowZ) * (1 - t) + roadLevelAt(rowZ + row) * t + cfg.roadSurface.lift;
+}

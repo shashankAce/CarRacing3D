@@ -22,6 +22,9 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
+# Headless data-check bundle (node scripts/buildRideCheck.mjs)
+scripts/.out/
+
 # match3-playable build output (npm run build / pack:<target>)
 build
 build-*

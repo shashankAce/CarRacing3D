@@ -19,6 +19,20 @@ export interface VehicleVisual {
     rearIndicators: RearIndicatorGeometry;
     /** Spins the four custom wheel instances by travelled distance in metres. */
     spinWheels: (distance: number) => void;
+    /**
+     * Ground-plane contact point (x/z) of each rendered tyre, in the root's
+     * local frame — the truth the ride telemetry compares PlayerCar's own
+     * sampled footprint (fractions of half-width/half-length) against.
+     */
+    wheelContacts: { x: number; z: number }[];
+    /**
+     * How far the lowest rendered tyre sits ABOVE the root's y=0 plane, metres
+     * (0 when the tyres are the lowest geometry). Normalisation pins the bbox
+     * minimum to y=0, so if anything else is lower the wheels — and with them
+     * the whole visible contact patch — hover by this much, no matter what the
+     * suspension does. The "car looks flying" metric the ride telemetry logs.
+     */
+    wheelBottomOffset: number;
 }
 
 export interface RearIndicatorGeometry {
@@ -215,6 +229,10 @@ export class VehicleModels {
             shadowGeometries,
             rearIndicators: template.rearIndicators,
             spinWheels,
+            wheelContacts: template.wheels.map((wheel) => ({ x: wheel.centre.x, z: wheel.centre.z })),
+            wheelBottomOffset: template.wheels.reduce(
+                (worst, wheel) => Math.max(worst, wheel.centre.y - wheel.radius), 0,
+            ),
         };
     }
 
