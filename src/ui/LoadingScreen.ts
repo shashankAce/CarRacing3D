@@ -108,8 +108,8 @@ export class LoadingScreen {
             { src: 'res/loading.jpg', type: 'image', alias: LOADING_BACKGROUND_ALIAS },
             // Kept explicit so production asset trimming retains the atlas page
             // referenced by the BMFont descriptor.
-            { src: 'res/MonsterRacing.png', type: 'image' },
-            { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
+            // { src: 'res/MonsterRacing.png', type: 'image' },
+            // { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
             { src: 'res/right-chevron.png', type: 'image', alias: CHEVRON_ALIAS },
             { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
             { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
