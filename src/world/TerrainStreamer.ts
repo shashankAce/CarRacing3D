@@ -94,7 +94,7 @@ export class TerrainStreamer {
         const material = new THREE.MeshStandardMaterial({
             color: 0xffffff,
             vertexColors: true,
-            roughness: 0.94,
+            roughness: 0.78,
             metalness: 0.0,
         });
         // One instance shared by every chunk, so a single shader patch reaches

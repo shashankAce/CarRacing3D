@@ -34,7 +34,7 @@ export const gameConfig = {
         // `SkyDome.effectiveHorizonColor`.
         road: 0x2e2e35,
         // road: 0x777778,
-        roadLine: 0xe8e4cf,
+        roadLine: 0xfff6d8,
         car: {
             body: 0xe14b3c,
             cabin: 0x27384f,
@@ -64,10 +64,10 @@ export const gameConfig = {
     environments: {
         forest: {
             terrain: {
-                low: 0x5d7a44,
-                high: 0xa8a556,
+                low: 0x4a7038,
+                high: 0xb8c25a,
                 dirt: 0x7a4f2a,
-                rock: 0xc9a17e,
+                rock: 0xb98a63,
             },
             sky: {
                 zenith: 0x2f7ab8,
@@ -1211,7 +1211,7 @@ export const gameConfig = {
         ambientIntensityLow: 1.75,
         sunColor: 0xfff2dd,
         /** Raised with `ambientIntensity` lowered, so the LIT level holds while the range widens. */
-        sunIntensity: 3.6,
+        sunIntensity: 3.9,
         /**
          * The moon, which replaces the sun as the light source once the sun sets.
          * It is placed at the sun's ANTIPODE — opposite azimuth, mirrored
@@ -1257,7 +1257,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 16.5,
+            hour: 17.2,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
