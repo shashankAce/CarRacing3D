@@ -81,7 +81,7 @@ export class GameOverPanel {
         this._bestValue = this._secondaryLabel(leftColumnX, e.secondaryY - 14, columnWidth, '', e.secondaryValueFontSize, c.surfaceColor, Label.TextAlign.LEFT, 'rajdhani_bold');
 
         this._secondaryLabel(rightColumnX, e.secondaryY + 16, columnWidth, 'CUTS', e.secondaryLabelFontSize, c.mutedColor, Label.TextAlign.RIGHT);
-        this._cutsValue = this._secondaryLabel(rightColumnX, e.secondaryY - 14, columnWidth, '', e.secondaryValueFontSize, c.orange, Label.TextAlign.RIGHT, 'rajdhani_bold');
+        this._cutsValue = this._secondaryLabel(rightColumnX, e.secondaryY - 14, columnWidth, '', e.secondaryValueFontSize, c.surfaceColor, Label.TextAlign.RIGHT, 'rajdhani_bold');
 
         // Action — "PLAY AGAIN" (the reference's "MAIN MENU" button is dropped).
         const playAgain = new Node(cx, e.buttonY);
@@ -89,10 +89,10 @@ export class GameOverPanel {
         playAgain.width = c.panelWidth - 72;
         playAgain.height = c.buttonHeight;
         const shelfNode = new Node(0, -c.buttonShelf / 2);
-        shelfNode.addComponent(Graphics).drawRoundedRectangle(playAgain.width, c.buttonHeight, c.buttonRadius, c.orangeShelf);
+        shelfNode.addComponent(Graphics).drawRoundedRectangle(playAgain.width, c.buttonHeight, c.buttonRadius, c.greenShelf);
         playAgain.addChild(shelfNode);
         const faceNode = new Node(0, c.buttonShelf / 2);
-        faceNode.addComponent(Graphics).drawRoundedRectangle(playAgain.width, c.buttonHeight - c.buttonShelf, c.buttonRadius, c.orange);
+        faceNode.addComponent(Graphics).drawRoundedRectangle(playAgain.width, c.buttonHeight - c.buttonShelf, c.buttonRadius, c.green);
         playAgain.addChild(faceNode);
         // Inner top-edge highlight — the "physical, pressable" glow called out in DESIGN.md.
         const highlight = new Node(0, c.buttonHeight / 2 - c.buttonShelf - 1);

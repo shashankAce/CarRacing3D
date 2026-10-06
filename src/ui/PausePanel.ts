@@ -33,8 +33,8 @@ export class PausePanel {
         this._label(cx, iconY - 5, p.icon, p.iconFontSize, '#2a2a2a', 900);
         this._label(cx, p.titleY, p.title, p.titleFontSize, c.surfaceColor, 900);
 
-        const resume = this._button(cx, p.resumeY, p.resumeText, c.orange, c.orangeShelf, c.buttonText, p.buttonFontSize, onResume);
-        const restart = this._button(cx, p.restartY, p.restartText, c.green, c.greenShelf, c.surfaceColor, p.buttonFontSize, onRestart);
+        const resume = this._button(cx, p.resumeY, p.resumeText, c.green, c.greenShelf, c.buttonText, p.buttonFontSize, onResume);
+        const restart = this._button(cx, p.restartY, p.restartText, c.neutral, c.neutralShelf, c.surfaceColor, p.buttonFontSize, onRestart);
         const menu = this._button(cx, p.menuY, p.mainMenuText, c.neutral, c.neutralShelf, c.surfaceColor, p.buttonFontSize, onChangeCar);
         this.interactiveNodes = [resume, restart, menu];
         this._root.active = false;

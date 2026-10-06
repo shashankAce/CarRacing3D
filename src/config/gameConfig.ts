@@ -32,7 +32,7 @@ export const gameConfig = {
         // `sky.horizonSunsetColor` as the sun drops — so a hand-set fog colour
         // matches only at one sun angle and shows a seam at every other. See
         // `SkyDome.effectiveHorizonColor`.
-        road: 0x3c3c44,
+        road: 0x2e2e35,
         // road: 0x777778,
         roadLine: 0xe8e4cf,
         car: {
@@ -50,7 +50,7 @@ export const gameConfig = {
          * forest -> transition -> desert -> transition -> repeat.
          */
         cycle: {
-            enabled: true,
+            enabled: false,
             /** Metres of fully forest terrain before it starts drying out. */
             forestLength: 640,
             /** Metres of fully desert terrain before vegetation returns. */
@@ -64,17 +64,17 @@ export const gameConfig = {
     environments: {
         forest: {
             terrain: {
-                low: 0x6a874d,
-                high: 0xb7b562,
+                low: 0x5d7a44,
+                high: 0xa8a556,
                 dirt: 0x7a4f2a,
-                rock: 0xd3ad89,
+                rock: 0xc9a17e,
             },
             sky: {
-                zenith: 0x4a94b8,
+                zenith: 0x2f7ab8,
                 zenithLow: 0x4a3a78,
-                horizon: 0x7fc2ea,
+                horizon: 0x5fb8e8,
                 horizonLow: 0xef8f52,
-                glow: 0xfff2c8,
+                glow: 0xffe9b8,
             },
         },
         desert: {
@@ -106,7 +106,7 @@ export const gameConfig = {
         /** Base world Y of the road surface, before `slopeAmplitude`. */
         level: 0,
         /** How far past the edge the terrain takes to reach ambient height. */
-        shoulderWidth: 7,
+        shoulderWidth: 5,
         /**
          * Lateral sway of the road centreline, metres. Every consumer — height
          * field, asphalt ribbon, markers, the car's own position, and later
@@ -123,7 +123,7 @@ export const gameConfig = {
          * `car.steering.maxYawAngle`. The car's lateral movement is derived from
          * that yaw, so there is no independent sideways-speed limit to tune.
          */
-        curveAmplitude: 8,
+        curveAmplitude: 10,
         curveFrequency: 0.018,
         /**
          * Vertical crests and dips, metres. Same deal as the curve: one
@@ -643,11 +643,11 @@ export const gameConfig = {
         panelStroke: '#87abe54d',
         panelShadow: '#00000066',
         surfaceColor: '#e5e2e1',
-        mutedColor: '#ddc1ae',
+        mutedColor: '#9fb2c1',
         orange: '#ff8c00',
         orangeShelf: '#904d00',
-        green: '#2e4d36',
-        greenShelf: '#183721',
+        green: '#2ecc71',
+        greenShelf: '#1a7a43',
         neutral: '#353535',
         neutralShelf: '#1f2020',
         buttonText: '#17110a',
@@ -698,12 +698,12 @@ export const gameConfig = {
             statBoxY: 726,
             statBoxHeight: 140,
             statBoxGap: 16,
-            statBoxColor: '#2e4d36cc',
+            statBoxColor: '#1c2a22cc',
             statBoxStroke: '#87abe54d',
             statLabelFontSize: 15,
             statNumberFontSize: 38,
-            distanceColor: '#accfb1',
-            scoreColor: '#ffb77d',
+            distanceColor: '#ffffff',
+            scoreColor: '#ffd24a',
 
             // Best-distance (persisted, see GameOverPanel) / cuts strip.
             secondaryY: 588,
@@ -745,19 +745,19 @@ export const gameConfig = {
          * closer dashes stream past faster at the same m/s.
          */
         dash: {
-            spacing: 6,
-            count: 50,
+            spacing: 4.5,
+            count: 60,
             width: 0.22,
             length: 3.0,
         },
         /** Roadside posts — the strongest speed cue, because they pass close by. */
         post: {
-            spacing: 10,
-            count: 32,
+            spacing: 7.5,
+            count: 40,
             width: 0.18,
-            height: 1.2,
+            height: 1.4,
             /** Lateral gap beyond the road edge. */
-            offset: 1.0,
+            offset: 0.7,
             color: 0xdedad0,
         },
     },
@@ -794,7 +794,7 @@ export const gameConfig = {
         /** Cars cut — the skill readout, so it sits with the distance. */
         cutsY: 1088,
         cutsFontSize: 30,
-        cutsColor: '#eaff04',
+        cutsColor: '#ffd24a',
         /**
          * Fuel gauge, drawn as block glyphs in a monospace label. A real bar
          * would need a ColorRect and the `graphics` system, which auto-trim
@@ -803,8 +803,8 @@ export const gameConfig = {
          */
         fuelY: 1035,
         fuelFontSize: 28,
-        fuelColor: '#8de89b',
-        fuelWarnColor: '#ff7a5c',
+        fuelColor: '#ffffff',
+        fuelWarnColor: '#ff5a4e',
         fuelCells: 14,
         /** Game-over panel. */
         gameOverY: 760,
@@ -817,12 +817,12 @@ export const gameConfig = {
         restartY: 570,
         restartFontSize: 30,
         restartText: 'TAP TO RESTART',
-        restartColor: '#9fe8ff',
+        restartColor: '#ffd24a',
         distanceFontSize: 42,
         speedFontSize: 34,
-        hintFontSize: 26,
-        textColor: '#f4f9fb',
-        hintColor: '#c9d9e2',
+        hintFontSize: 20,
+        textColor: '#ffffff',
+        hintColor: '#9fb2c1',
         hintText: '◀ ▶ STEER    ▲ GAS    ▼ BRAKE',
     },
 
@@ -933,14 +933,14 @@ export const gameConfig = {
         driveFontSize: 32,
         titleColor: '#ffffff',
         titleAccentColor: '#e2202e',
-        descriptionColor: '#f0f3f6',
+        descriptionColor: '#9fb2c1',
         headerGradientLeft: '#03070b',
-        headerGradientCenter: '#0b2639',
+        headerGradientCenter: '#1a1210',
         headerGradientRight: '#03070b',
-        headerEdgeColor: '#2b394377',
-        statLabelColor: '#f7f8fa',
+        headerEdgeColor: '#e2202e33',
+        statLabelColor: '#9fb2c1',
         statValueColor: '#ffffff',
-        statTrackColor: '#818080',
+        statTrackColor: '#2a3138',
         statFillColor: '#e2202e',
         driveColor: '#ffffff',
         driveGradientTop: '#e2202e',
@@ -1019,7 +1019,7 @@ export const gameConfig = {
             spotlightMaxAngle: 1.15,
             spotlights: [
                 { color: 0xffffff, intensity: 330, distance: 28, angle: 0.48, penumbra: 0.62, position: { x: -4.8, y: 5.8, z: 5.0 } },
-                { color: 0x66cfff, intensity: 250, distance: 25, angle: 0.50, penumbra: 0.72, position: { x: 5.5, y: 5.4, z: 2.2 } },
+                { color: 0xffd9a8, intensity: 250, distance: 25, angle: 0.50, penumbra: 0.72, position: { x: 5.5, y: 5.4, z: 2.2 } },
                 { color: 0xb26cff, intensity: 300, distance: 24, angle: 0.44, penumbra: 0.68, position: { x: 0.4, y: 4.8, z: -5.3 } },
             ],
             shadowMapSize: 512,
@@ -1133,7 +1133,7 @@ export const gameConfig = {
      * `height` makes the same m/s feel slower, every time.
      */
     camera: {
-        fov: 68,
+        fov: 71,
         /**
          * `far` must exceed `sky.domeRadius`, which must in turn exceed the
          * farthest terrain corner (305m at the current chunk window) — the dome
@@ -1145,16 +1145,16 @@ export const gameConfig = {
         near: 1,
         far: 400,
         /** Offset from the car, in the car's own space. +Z is behind. */
-        height: 5,
-        distance: 12,
+        height: 3.8,
+        distance: 10.5,
         /** Look-at target height, and how far down the road it sits. */
-        lookHeight: 5,
-        lookAhead: 20,
-        followRate: 7,
+        lookHeight: 4.2,
+        lookAhead: 15,
+        followRate: 9.5,
         /** Extra pull-back at top speed, metres. Keep small — pulling back reduces speed feel. */
-        distanceSpeedGain: 0.8,
+        distanceSpeedGain: 1.2,
         /** Extra FOV degrees at top speed. Stretches the periphery; reads as acceleration. */
-        fovSpeedGain: 8,
+        fovSpeedGain: 11,
     },
 
     /**
@@ -1187,7 +1187,7 @@ export const gameConfig = {
          * `timeOfDay` interpolates from `ambientIntensityLow` to this value, so
          * lowering it steepens that curve as well as darkening midday shadow.
          */
-        ambientIntensity: 0.55,
+        ambientIntensity: 0.62,
         /**
          * Ambient at the sun's floor. A low sun stops filling the scene: at 9
          * degrees an upward terrain normal gets N.L ~ 0.16, so the sun's
@@ -1211,7 +1211,7 @@ export const gameConfig = {
         ambientIntensityLow: 1.75,
         sunColor: 0xfff2dd,
         /** Raised with `ambientIntensity` lowered, so the LIT level holds while the range widens. */
-        sunIntensity: 3.3,
+        sunIntensity: 3.6,
         /**
          * The moon, which replaces the sun as the light source once the sun sets.
          * It is placed at the sun's ANTIPODE — opposite azimuth, mirrored
@@ -1257,7 +1257,7 @@ export const gameConfig = {
             /** 'fixed' uses `hour`; 'local' reads the device clock ONCE at boot. */
             mode: 'fixed' as 'fixed' | 'local',
             /** Hour used by 'fixed' mode, 0-24 and fractional. */
-            hour: 12,
+            hour: 16.5,
             /**
              * Observer latitude, degrees. This is a REAL solar position now, not
              * a stylised arc — latitude sets how high the sun climbs, how fast it
@@ -1526,8 +1526,8 @@ export const gameConfig = {
          * previous 12/5.5-9.5, from roughly HALF the trees — so ~3.7k triangles
          * instead of ~8.3k, in both the main and the shadow pass.
          */
-        heightMin: 8,
-        heightMax: 16,
+        heightMin: 7,
+        heightMax: 13,
         trunkRadiusK: 0.035,
         canopyRadiusK: 0.30,
         tiersMin: 3,
@@ -1564,7 +1564,7 @@ export const gameConfig = {
         foliageHighColor: 0x71b53a,
 
         /** Average metres between placement candidates, before rejection. */
-        spacing: 38,
+        spacing: 24,
         /** Candidates on ground steeper than this are rejected. */
         maxSlope: 0.55,
         /**
@@ -1572,7 +1572,7 @@ export const gameConfig = {
          * trees grow out of the verge and the player clips scenery that looks
          * like it's beside the road rather than on it.
          */
-        roadClearance: 10,
+        roadClearance: 8.5,
         /**
          * Density mask: candidates whose noise value falls below this are
          * dropped, which is what produces clumps and clearings instead of an
@@ -1712,7 +1712,7 @@ export const gameConfig = {
          * the sun drops, the same way it blends the horizon — so the top of the
          * sky tracks time of day instead of staying midday blue under a sunset.
          */
-        zenithColor: 0x4a94b8,
+        zenithColor: 0x2f7ab8,
         /** Zenith before sunrise: deep, cool, still holding night. */
         zenithDawnColor: 0x1d3a6b,
         /** Zenith after sunset: violet, the classic complement to an orange horizon. */
@@ -1737,7 +1737,7 @@ export const gameConfig = {
          * sin(timeOfDay.maxElevation) = 0.799, so the horizon is permanently
          * ~20% `horizonLowColor`. Best case at this value is rgb(201,228,231).
          */
-        horizonColor: 0x7fc2ea,
+        horizonColor: 0x5fb8e8,
         /**
          * The horizon colour at a low sun; `horizonColor` is where it lands at a
          * high one, blended by the sun's height. `effectiveHorizonColor()` runs
@@ -1783,7 +1783,7 @@ export const gameConfig = {
          * afternoon, which is what makes it visible — and which also means the
          * scene is backlit and shadows point toward the viewer.
          */
-        sunGlowColor: 0xfff2c8,
+        sunGlowColor: 0xffe9b8,
         /**
          * Sun glow lobes: a broad halo plus a tight disc, each an amplitude and
          * a `pow(dot, exp)` exponent. A lobe falls to half at
