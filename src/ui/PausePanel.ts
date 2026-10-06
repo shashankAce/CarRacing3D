@@ -1,4 +1,4 @@
-import { ColorRect, Graphics, Input, Label, Node, Scene } from 'noonengine';
+import { assetCache, ColorRect, Graphics, Input, Label, Node, Scene, Sprite } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
 
 /** Tactile pause modal. It owns input while visible, leaving the 3D scene intact behind it. */
@@ -7,6 +7,8 @@ export class PausePanel {
     readonly interactiveNodes: readonly Node[];
     private readonly _root = new Node();
     private _visible = false;
+    private iconLoaded = false;
+    private pauseIcon: Sprite;
 
     constructor(scene: Scene, onResume: () => void, onRestart: () => void, onChangeCar: () => void) {
         const c = cfg.overlays;
@@ -30,7 +32,17 @@ export class PausePanel {
         const ring = new Node(cx, iconY);
         ring.addComponent(Graphics).setStroke(c.mutedColor, p.iconStrokeWidth).setFill(c.mutedColor).drawCircle(p.iconRadius);
         this._root.addChild(ring);
-        this._label(cx, iconY - 5, p.icon, p.iconFontSize, '#2a2a2a', 900);
+        // this._label(cx, iconY - 5, p.icon, p.iconFontSize, '#2a2a2a', 900);
+
+        const iconImage = new Node(cx, iconY);
+        this._root.addChild(iconImage);
+        this.pauseIcon = iconImage.addComponent(Sprite);
+        this.pauseIcon.tint = "#000";
+
+        // const texture = assetCache.getAsset(PAUSE_BUTTON_IMAGE_ALIAS);
+        // if (!texture) throw new Error(`Pause button image "${PAUSE_BUTTON_IMAGE_ALIAS}" is not loaded`);
+        // this._icon.texture = texture;
+
         this._label(cx, p.titleY, p.title, p.titleFontSize, c.surfaceColor, 900);
 
         const resume = this._button(cx, p.resumeY, p.resumeText, c.green, c.greenShelf, c.buttonText, p.buttonFontSize, onResume);
@@ -42,8 +54,22 @@ export class PausePanel {
 
     get isVisible(): boolean { return this._visible; }
 
-    show(): void { this._visible = true; this._root.active = true; }
-    hide(): void { this._visible = false; this._root.active = false; }
+    show(): void {
+        this._visible = true;
+        this._root.active = true;
+
+        if (!this.iconLoaded) {
+            let tex = assetCache.getAsset('pausebtn');
+            if (tex) {
+                this.iconLoaded = true;
+                this.pauseIcon.texture = tex;
+            }
+        }
+    }
+    hide(): void {
+        this._visible = false;
+        this._root.active = false;
+    }
 
     private _surface(x: number, y: number, width: number, height: number, radius: number, fill: string, stroke?: string): Node {
         const node = new Node(x, y);

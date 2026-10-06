@@ -1,11 +1,14 @@
-import { Graphics, Input, Label, Node, Scene, Widget } from 'noonengine';
+import { assetCache, Graphics, Input, Node, Scene, Sprite, Widget } from 'noonengine';
 import { gameConfig as cfg } from '../config/gameConfig';
+
+const PAUSE_BUTTON_IMAGE_ALIAS = 'pausebtn';
 
 /** Compact, always-reachable control that opens the pause modal. */
 export class PauseButton {
 
     readonly node: Node;
-    private readonly _icon: Label;
+    private readonly _icon: Sprite;
+    private _iconLoaded = false;
     private readonly _surface: Graphics;
 
     constructor(scene: Scene, private readonly _onPause: () => void) {
@@ -16,36 +19,37 @@ export class PauseButton {
         this.node.height = c.size;
         scene.addChild(this.node);
 
-        const widget = this.node.addComponent(Widget);
-        widget.top = c.edgeMargin;
-        widget.left = c.edgeMargin;
-        widget.alignToWindow = true;
-
         const surfaceNode = new Node();
         this._surface = surfaceNode.addComponent(Graphics);
         this._surface.setStroke(c.stroke, 2);
         this._surface.drawCircle(c.radius, c.background);
         this.node.addChild(surfaceNode);
 
-        const iconNode = new Node();
-        this._icon = iconNode.addComponent(Label);
-        this._icon.text = c.glyph;
-        this._icon.fontFamily = cfg.overlays.fontFamily;
-        this._icon.fontWeight = 900;
-        this._icon.fontSize = c.fontSize;
-        this._icon.color = c.color;
-        this.node.addChild(iconNode);
+        const widget = this.node.addComponent(Widget);
+        widget.top = c.edgeMargin;
+        widget.left = c.edgeMargin;
+        widget.alignToWindow = true;
+
+        const iconImage = new Node();
+        this.node.addChild(iconImage);
+        this._icon = iconImage.addComponent(Sprite);
         this.node.on(Input.POINTER_DOWN, this._press, this);
     }
 
-    setVisible(visible: boolean): void { this.node.active = visible; }
+    setVisible(visible: boolean): void {
+        if (visible && !this._iconLoaded) {
+            const texture = assetCache.getAsset(PAUSE_BUTTON_IMAGE_ALIAS);
+            if (!texture) throw new Error(`Pause button image "${PAUSE_BUTTON_IMAGE_ALIAS}" is not loaded`);
+            this._icon.texture = texture;
+            this._iconLoaded = true;
+        }
+        this.node.active = visible;
+    }
 
     private _press(): void {
         const c = cfg.overlays.pauseButton;
-        this._icon.color = c.pressed;
-        this._surface.fillColor = c.pressed;
+        this._icon.tint = c.pressed;
         this._onPause();
-        this._icon.color = c.color;
-        this._surface.fillColor = c.background;
+        this._icon.tint = '#ffffff';
     }
 }

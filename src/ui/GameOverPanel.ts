@@ -41,7 +41,7 @@ export class GameOverPanel {
         // Header — the crash reason ("CRASHED" / "OUT OF FUEL") stands in for the
         // reference's static "GAME OVER" headline.
         this._reason = this._label(cx, e.reasonY, '', e.reasonFontSize, e.reasonColor, 'rajdhani_bold');
-        this._reason.fontStyle = 'italic';
+        // this._reason.fontStyle = 'italic';
         this._reason.node.width = contentWidth;
         this._reason.overflow = Label.Overflow.SHRINK;
         this._reason.setShadow(0, 4, 14, '#000000b3');
@@ -77,10 +77,10 @@ export class GameOverPanel {
         const leftColumnX = cx - contentWidth / 4;
         const rightColumnX = cx + contentWidth / 4;
 
-        this._secondaryLabel(leftColumnX, e.secondaryY + 16, columnWidth, 'BEST DISTANCE', e.secondaryLabelFontSize, c.mutedColor, Label.TextAlign.LEFT);
+        this._secondaryLabel(leftColumnX, e.secondaryY + 16, columnWidth, 'BEST DISTANCE', e.secondaryLabelFontSize, c.mutedColor, Label.TextAlign.LEFT, 'rajdhani_medium');
         this._bestValue = this._secondaryLabel(leftColumnX, e.secondaryY - 14, columnWidth, '', e.secondaryValueFontSize, c.surfaceColor, Label.TextAlign.LEFT, 'rajdhani_bold');
 
-        this._secondaryLabel(rightColumnX, e.secondaryY + 16, columnWidth, 'CUTS', e.secondaryLabelFontSize, c.mutedColor, Label.TextAlign.RIGHT);
+        this._secondaryLabel(rightColumnX, e.secondaryY + 16, columnWidth, 'CUTS', e.secondaryLabelFontSize, c.mutedColor, Label.TextAlign.RIGHT, 'rajdhani_medium');
         this._cutsValue = this._secondaryLabel(rightColumnX, e.secondaryY - 14, columnWidth, '', e.secondaryValueFontSize, c.surfaceColor, Label.TextAlign.RIGHT, 'rajdhani_bold');
 
         // Action — "PLAY AGAIN" (the reference's "MAIN MENU" button is dropped).
@@ -157,7 +157,7 @@ export class GameOverPanel {
         const box = new Node(x, y);
         box.addComponent(Graphics).setStroke(e.statBoxStroke, 1.5).drawRoundedRectangle(width, e.statBoxHeight, 16, e.statBoxColor);
         this._root.addChild(box);
-        const label = this._label(x, y + e.statBoxHeight / 2 - 26, caption, e.statLabelFontSize, cfg.overlays.mutedColor, 'rajdhani_light');
+        const label = this._label(x, y + e.statBoxHeight / 2 - 26, caption, e.statLabelFontSize, cfg.overlays.mutedColor, 'rajdhani_medium');
         label.letterSpacing = 1.5;
     }
 

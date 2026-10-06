@@ -114,8 +114,10 @@ export class LoadingScreen {
             { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
             { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
             { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
+            { src: 'res/pausebtn.png', type: 'image', alias: "pausebtn" },
             { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
             { src: 'res/fontTTF/rajdhani-light.ttf', type: 'font', fontName: 'rajdhani_light', alias: 'rajdhani_light' },
+            { src: 'res/fontTTF/Rajdhani-Medium.ttf', type: 'font', fontName: 'rajdhani_medium', alias: 'rajdhani_medium' },
             { src: 'res/fontTTF/rajdhani-semibold.ttf', type: 'font', fontName: 'rajdhani_semibold', alias: 'rajdhani_semibold' },
         ]);
         this._backgroundSprite.texture = assetCache.getAsset(LOADING_BACKGROUND_ALIAS);

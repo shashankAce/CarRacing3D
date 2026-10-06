@@ -219,8 +219,8 @@ export class GameScene extends Scene {
         }
         this._environmentToggle = new EnvironmentToggle(this, activeEnvironment(), () => this._switchEnvironment());
         this._environmentToggle.setVisible(false);
-        this._fullscreenButton = new FullscreenButton(this);
-        this._input.ignoreTapTarget(this._fullscreenButton.node);
+        // this._fullscreenButton = new FullscreenButton(this);
+        // this._input.ignoreTapTarget(this._fullscreenButton.node);
         this._pausePanel = new PausePanel(
             this,
             () => this._resumeRun(),
@@ -234,6 +234,7 @@ export class GameScene extends Scene {
         for (const node of this._gameOver.interactiveNodes) this._input.ignoreTapTarget(node);
         this._loading = new LoadingScreen(this);
         this._setLoadingProgress('assets', 0);
+        
         if (cfg.debug.showPerf) {
             this._perf = new PerfHud(this, this._terrain, this._scatter, sys);
             // Debug bisection hook for the tree mask; see `debugStats`.
@@ -461,7 +462,7 @@ export class GameScene extends Scene {
         this._gameOver.hide();
         this._controls.setEnabled(true);
         this._hud.setVisible(true);
-        this._environmentToggle.setVisible(true);
+        this._environmentToggle.setVisible(false);
         this._pauseButton.setVisible(true);
         this._state.reset();
         setEnvironmentPosition(this._state.scroll.travelled);
@@ -602,7 +603,7 @@ export class GameScene extends Scene {
         this._discardSelectionTap = true;
         this._controls.setEnabled(true);
         this._hud.setVisible(true);
-        this._environmentToggle.setVisible(true);
+        this._environmentToggle.setVisible(false);
         this._pauseButton.setVisible(true);
         // The selection tap is also seen by InputController's global listener;
         // consume it so it cannot trigger an accidental restart later.
@@ -641,7 +642,7 @@ export class GameScene extends Scene {
         this._pausePanel.hide();
         this._controls.setEnabled(true);
         this._hud.setVisible(true);
-        this._environmentToggle.setVisible(true);
+        this._environmentToggle.setVisible(false);
         this._pauseButton.setVisible(true);
         this._input.clearHold();
     }
