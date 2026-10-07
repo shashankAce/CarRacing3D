@@ -38,6 +38,10 @@ export class FollowCamera {
     /** @param speedT 0…1 from GameState — widens FOV and eases back as speed rises. */
     update(dt: number, car: PlayerCar, speedT: number): void {
         const c = cfg.camera;
+        if (c.sideInspection.enabled) {
+            this._placeSideInspection(car);
+            return;
+        }
         const distance = c.distance + speedT * c.distanceSpeedGain;
         // Player movement stays ground-pivoted. Frame from the visual centre
         // so camera height follows whichever car is selected without affecting
@@ -68,10 +72,28 @@ export class FollowCamera {
     /** Jump straight to the rest pose, with no easing — for scene start and restart. */
     snapTo(car: PlayerCar): void {
         const c = cfg.camera;
+        if (c.sideInspection.enabled) {
+            this._placeSideInspection(car);
+            return;
+        }
         const pos = this._camera.position;
         const baseY = car.position.y + car.visualHeight * 0.5;
         pos.set(car.position.x, baseY + c.height, car.position.z + c.distance);
         this._camera.fov = c.fov;
         this._camera.lookAt(pos.x, baseY + c.lookHeight, pos.z - c.lookAhead);
+    }
+
+    private _placeSideInspection(car: PlayerCar): void {
+        const c = cfg.camera.sideInspection;
+        const targetY = car.position.y + car.visualHeight * 0.5;
+        // Follow exactly so camera lag cannot look like the car separating
+        // from the road. Stay low enough to see beneath both axles.
+        this._camera.position.set(
+            car.position.x + c.distance,
+            targetY + c.height,
+            car.position.z + c.rearOffset,
+        );
+        this._camera.lookAt(car.position.x, targetY, car.position.z);
+        if (Math.abs(this._camera.fov - c.fov) > 0.05) this._camera.fov = c.fov;
     }
 }

@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { gameConfig as cfg } from '../config/gameConfig';
 import {
-    lightFrame, bakeShadowAtlas, type ShadowAtlas,
+    lightFrame, type ShadowAtlas,
 } from '../procedural/shadowSilhouette';
+import { PosedShadowAtlas } from '../procedural/PosedShadowAtlas';
 
 /**
  * ProjectedShadows — shadows computed inside the RECEIVER's fragment shader.
@@ -64,8 +65,9 @@ import {
  *
  * ## Cost
  *
- * Zero extra draw calls and zero render targets per frame — the atlas is baked
- * once at boot. The price is per-fragment and O(slots) on every receiver: a few
+ * One capture draw per vehicle whose orientation changes, into a reused atlas.
+ * Translation alone needs no recapture. The price is also per-fragment and
+ * O(slots) on every receiver: a few
  * dot products, and a texture fetch only for fragments actually inside a
  * caster's footprint. `maxCasters` is therefore the dial that matters, and it is
  * a COMPILE-TIME constant in the shader, so changing it recompiles.
@@ -104,7 +106,7 @@ export interface ReceiverOptions {
 interface PendingCaster {
     handle: number;
     x: number; y: number; z: number;
-    cos: number; sin: number;
+    rotation: THREE.Quaternion;
     /** Sort key; lower is kept when there are more casters than slots. */
     priority: number;
 }
@@ -112,6 +114,7 @@ interface PendingCaster {
 export class ProjectedShadows {
     private _casterGeometries: THREE.BufferGeometry[][] = [];
     private _atlas: ShadowAtlas | null = null;
+    private _posedAtlas: PosedShadowAtlas | null = null;
     private _renderer: THREE.WebGLRenderer | null = null;
     private _frame = lightFrame(cfg.lighting.sunDirection);
 
@@ -120,7 +123,6 @@ export class ProjectedShadows {
 
     private _origin: THREE.Vector4[] = [];
     private _shape: THREE.Vector4[] = [];
-    private _basis: THREE.Vector4[] = [];
     /** Conservative render-space XZ rectangles for a cheap pre-loop reject. */
     private _bounds: THREE.Vector4[] = [];
 
@@ -147,21 +149,19 @@ export class ProjectedShadows {
         for (let i = 0; i < this._slots; i++) {
             this._origin.push(new THREE.Vector4(0, ProjectedShadows.PARKED_Y, 0, 0));
             this._shape.push(new THREE.Vector4(0, 0, 0, 0));
-            this._basis.push(new THREE.Vector4(1, 0, 0, 1));
             // min > max makes every finite fragment fail the bounds test.
             this._bounds.push(new THREE.Vector4(1, 1, -1, -1));
         }
 
         const S = this._frame.S;
-        const liftScale = -1 / Math.max(1e-3, S.y);
         this._uniforms = {
             uProjShadowAtlas: { value: null },
             uProjShadowOrigin: { value: this._origin },
             uProjShadowShape: { value: this._shape },
-            uProjShadowBasis: { value: this._basis },
+            uProjShadowR: { value: this._frame.R },
+            uProjShadowU: { value: this._frame.U },
             uProjShadowBounds: { value: this._bounds },
             uProjShadowSun: { value: new THREE.Vector3(S.x, S.y, S.z) },
-            uProjShadowUy: { value: this._frame.U.y },
             uProjShadowGrid: { value: new THREE.Vector4(1, 1, 1, 1) },
             // x = atlas-wide depth minimum; y = depth span in metres. Atlas
             // green was ENCODED with the reciprocal span, but reconstructing
@@ -228,13 +228,14 @@ export class ProjectedShadows {
         (this._uniforms.uTreeMaskLift.value as THREE.Vector4).z = y;
     }
 
-    /** Bakes the atlas. Needs a renderer, so it runs once the renderer exists. */
+    /** Allocates the pose atlas; live cells are captured during commit. */
     bake(renderer: THREE.WebGLRenderer): void {
         if (this._casterGeometries.length === 0) return;
         this._renderer = renderer;
         const ps = cfg.lighting.projectedShadows;
-        this._atlas?.target.dispose();
-        this._atlas = bakeShadowAtlas(renderer, this._casterGeometries, this._frame, ps.textureSize);
+        this._posedAtlas?.dispose();
+        this._posedAtlas = new PosedShadowAtlas(this._casterGeometries, this._frame, ps.textureSize, this._slots);
+        this._atlas = this._posedAtlas.atlas;
         this._uniforms.uProjShadowAtlas.value = this._atlas.texture;
         const { cols, rows } = this._atlas;
         (this._uniforms.uProjShadowGrid.value as THREE.Vector4)
@@ -310,10 +311,10 @@ varying vec3 vProjShadowWorld;
 uniform sampler2D uProjShadowAtlas;
 uniform vec4 uProjShadowOrigin[${count}];
 uniform vec4 uProjShadowShape[${count}];
-uniform vec4 uProjShadowBasis[${count}];
+uniform vec3 uProjShadowR;
+uniform vec3 uProjShadowU;
 uniform vec4 uProjShadowBounds[${count}];
 uniform vec3 uProjShadowSun;
-uniform float uProjShadowUy;
 uniform vec4 uProjShadowGrid;
 uniform vec2 uProjShadowDepth;
 uniform vec2 uProjShadowFade;
@@ -371,19 +372,16 @@ float projShadowFactor() {
         // per-pixel capture depth below; the origin alone is not a valid near
         // boundary for an offset wheel or any other asymmetric mesh part.
         float d = -dot(rel, uProjShadowSun);
-        // R and U pre-rotated by the caster's yaw on the CPU, so the footprint
-        // turns with the vehicle. Both stay perpendicular to the light in the
-        // caster's own frame; R is horizontal so only x/z vary, and U's y
-        // component is invariant under a yaw and is passed once.
-        vec4 basis = uProjShadowBasis[i];
-        float r = rel.x * basis.x + rel.z * basis.y;
-        float u = rel.x * basis.z + rel.y * uProjShadowUy + rel.z * basis.w;
+        // The capture already contains full chassis rotation. Keep the
+        // lookup perpendicular to the WORLD sun so contact shadows stay pinned.
+        float r = dot(rel, uProjShadowR);
+        float u = dot(rel, uProjShadowU);
 
         vec4 shape = uProjShadowShape[i];
         vec2 cellUv = vec2((r - shape.x) * shape.z, (u - shape.y) * shape.w);
         if (cellUv.x < 0.0 || cellUv.x > 1.0 || cellUv.y < 0.0 || cellUv.y > 1.0) continue;
 
-        vec2 cell = vec2(mod(origin.w, uProjShadowGrid.x), floor(origin.w * uProjShadowGrid.z));
+        vec2 cell = vec2(mod(float(i), uProjShadowGrid.x), floor(float(i) * uProjShadowGrid.z));
         vec4 atlasSample = texture2D(uProjShadowAtlas, (cell + cellUv) * uProjShadowGrid.zw);
         // Green is the nearest captured surface along this exact light ray.
         // Unlike a centre-depth test it does not assume the caster origin is the
@@ -428,15 +426,15 @@ void main() {`)
     /**
      * Submits a caster at a world (render-space) position.
      *
-     * `yaw` turns the footprint with the vehicle. `priority` decides who keeps a
+     * `rotation` captures the complete yaw, pitch and roll of the vehicle. `priority` decides who keeps a
      * slot when there are more casters than slots — pass the squared distance
      * from the camera, or a negative number to pin something (the player's car)
      * in place regardless.
      */
-    add(handle: number, x: number, y: number, z: number, yaw: number, priority: number): void {
+    add(handle: number, x: number, y: number, z: number, rotation: THREE.Quaternion, priority: number): void {
         this._pending.push({
             handle, x, y, z,
-            cos: Math.cos(yaw), sin: Math.sin(yaw),
+            rotation,
             priority,
         });
     }
@@ -450,30 +448,15 @@ void main() {`)
             pending.sort((a, b) => a.priority - b.priority);
         }
         const live = Math.min(pending.length, this._slots);
-        const R = this._frame.R, U = this._frame.U;
+        this._posedAtlas!.update(this._renderer!, pending, live);
 
         for (let i = 0; i < live; i++) {
             const p = pending[i];
-            const cell = this._atlas.cells[p.handle];
+            const cell = this._atlas.cells[i];
 
-            this._origin[i].set(p.x, p.y, p.z, cell.cell);
+            this._origin[i].set(p.x, p.y, p.z, p.handle);
             this._shape[i].set(cell.rMin, cell.uMin, cell.invSpanR, cell.invSpanU);
 
-            // Rotate R and U about Y by the caster's yaw. Sampling `rel` against
-            // a rotated basis is the same as rotating `rel` into the caster's
-            // frame, and costs four floats instead of a matrix.
-            //
-            // NOTE this leaves the basis no longer exactly perpendicular to the
-            // world light, so the silhouette used is the one for a slightly
-            // wrong light azimuth. That error is second order in the yaw, while
-            // NOT rotating leaves a shadow that fails to turn with a vehicle —
-            // first order in its length, and far more visible on a 9m bus.
-            this._basis[i].set(
-                R.x * p.cos + R.z * p.sin,
-                -R.x * p.sin + R.z * p.cos,
-                U.x * p.cos + U.z * p.sin,
-                -U.x * p.sin + U.z * p.cos,
-            );
             this._writeBounds(i, p.x, p.z);
         }
         // Park the rest below the world, where their enormous light-frame U
@@ -491,23 +474,23 @@ void main() {`)
      * A fragment can contribute only while r/u are inside the atlas cell and d
      * lies between the atlas-wide nearest possible surface and `fadeFar`.
      * Inverting that same transform and projecting its eight box corners gives
-     * a rectangle containing every possible accepted fragment. Yaw is already
-     * folded into `_basis`, so turning cars stay covered without a guessed
+     * a rectangle containing every possible accepted fragment. Full rotation
+     * is already captured in the atlas, so turning cars stay covered without a guessed
      * radius or quality-sensitive tuning value.
      */
     private _writeBounds(slot: number, originX: number, originZ: number): void {
         if (this._atlas === null) return;
-        const basis = this._basis[slot];
+        const R = this._frame.R, U = this._frame.U;
         const S = this._frame.S;
         const transform = this._coordToWorld.set(
-            basis.x, 0, basis.y,
-            basis.z, this._frame.U.y, basis.w,
+            R.x, R.y, R.z,
+            U.x, U.y, U.z,
             -S.x, -S.y, -S.z,
         );
 
         const determinant = transform.determinant();
         if (Math.abs(determinant) < 1e-5) {
-            // Defensive only: normal vehicle yaw never makes this singular.
+            // Defensive only: the orthonormal light frame is nonsingular.
             // A broad fallback preserves correctness if a future reskin does.
             const radius = cfg.lighting.projectedShadows.fadeFar + 20;
             this._bounds[slot].set(

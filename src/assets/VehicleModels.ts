@@ -15,6 +15,8 @@ export interface VehicleVisual {
     dimensions: { width: number; height: number; length: number };
     /** Static mesh geometry in the vehicle group's local coordinates, for shadow capture. */
     shadowGeometries: THREE.BufferGeometry[];
+    /** Measured tyre bottoms in the normalized chassis frame. */
+    tyreContacts: THREE.Vector3[];
     /** Exact rear red-palette surfaces, split for left/right turn signalling. */
     rearIndicators: RearIndicatorGeometry;
     /** Spins the four custom wheel instances by travelled distance in metres. */
@@ -36,6 +38,7 @@ interface VehicleTemplate {
     /** Bounds after the configured model scale and rotation have been applied. */
     dimensions: { width: number; height: number; length: number };
     wheels: WheelPlacement[];
+    tyreContacts: THREE.Vector3[];
     rearIndicators: RearIndicatorGeometry;
 }
 
@@ -212,6 +215,7 @@ export class VehicleModels {
             root,
             materials,
             dimensions: template.dimensions,
+            tyreContacts: template.tyreContacts,
             shadowGeometries,
             rearIndicators: template.rearIndicators,
             spinWheels,
@@ -242,8 +246,15 @@ export class VehicleModels {
             right: [] as THREE.BufferGeometry[],
         };
         const wheels: WheelPlacement[] = [];
+        const tyreContacts: THREE.Vector3[] = [];
         model.traverse((object) => {
             if (!(object instanceof THREE.Mesh)) return;
+            if (WHEEL_NAMES.has(object.name)) {
+                const tyreBounds = new THREE.Box3().setFromObject(object);
+                const contact = tyreBounds.getCenter(new THREE.Vector3());
+                contact.y = tyreBounds.min.y;
+                tyreContacts.push(contact);
+            }
             const replacesOriginalWheel = Boolean(this._testWheel && WHEEL_NAMES.has(object.name));
             if (replacesOriginalWheel) {
                 wheels.push(this._fitTestWheel(object));
@@ -306,7 +317,7 @@ export class VehicleModels {
         // The distant tier still has only one draw per material class, but its
         // body, wheels, glass, lights, doors and interior have each received
         // the same configurable reduction before batching.
-        return { geometries, dimensions, wheels, rearIndicators };
+        return { geometries, dimensions, wheels, tyreContacts, rearIndicators };
     }
 
     /**

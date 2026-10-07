@@ -3,7 +3,7 @@ import { Node, Scene } from 'noonengine';
 import { Group3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX, roadHeadingAt } from '../world/roadPath';
-import { surfaceHeightAt } from '../procedural/heightField';
+import { VehicleGrounding, fallbackTyreContacts } from './VehicleGrounding';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
 import type { VehicleModels } from '../assets/VehicleModels';
 
@@ -59,6 +59,7 @@ export interface TrafficVehicle {
     /** Cached from its type, for collision and placement. */
     halfWidth: number;
     halfLength: number;
+    tyreContacts: THREE.Vector3[];
     height: number;
 }
 
@@ -96,9 +97,7 @@ export class TrafficSystem {
     /** Drives indicator blinking; shared so every signal blinks in phase. */
     private _blinkClock = 0;
     /** Scratch objects shared by the sequential traffic placement pass. */
-    private _rideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
-    private _rideQuaternion = new THREE.Quaternion();
-    private _ridePoint = new THREE.Vector3();
+    private _grounding = new VehicleGrounding();
 
     /** Vehicles the player has cut past this run. */
     cuts = 0;
@@ -147,6 +146,7 @@ export class TrafficSystem {
                 // with the scaled FBX's measured bounds before gameplay starts.
                 halfWidth: initialSpec.width / 2,
                 halfLength: initialSpec.length / 2,
+                tyreContacts: fallbackTyreContacts(initialSpec.width, initialSpec.length),
                 height: initialSpec.height,
             });
         }
@@ -179,6 +179,8 @@ export class TrafficSystem {
             v.halfWidth = visual.dimensions.width / 2;
             v.halfLength = visual.dimensions.length / 2;
             v.height = visual.dimensions.height;
+            v.tyreContacts = visual.tyreContacts.length >= 3
+                ? visual.tyreContacts : fallbackTyreContacts(visual.dimensions.width, visual.dimensions.length);
             // VehicleModels rests each visual on y=0. Traffic uses the same
             // wheel/ground pivot as PlayerCar, so matching models have matching
             // placement and scale in both roles.
@@ -235,6 +237,7 @@ export class TrafficSystem {
         this._nextSpawnAt = travelled + cfg.traffic.spawnGapSlow;
 
         const t = cfg.traffic;
+        if (!t.enabled) return;
         let placed = 0;
         for (let attempt = 0; attempt < t.seedCount * 6 && placed < t.seedCount; attempt++) {
             const z = travelled + t.seedMinAhead
@@ -248,6 +251,7 @@ export class TrafficSystem {
      * @param speedT    0…1 through the speed ramp — tightens the spawn spacing.
      */
     update(dt: number, travelled: number, speedT: number, playerX: number): void {
+        if (!cfg.traffic.enabled) return;
         this._blinkClock += dt;
 
         // QA mode: retain the seeded traffic at its absolute world positions so
@@ -492,7 +496,7 @@ export class TrafficSystem {
             shadows.add(
                 this._projectedHandles[v.type],
                 obj.position.x, obj.position.y, obj.position.z,
-                obj.rotation.y,
+                obj.quaternion,
                 obj.position.x * obj.position.x + obj.position.z * obj.position.z,
             );
         }
@@ -500,84 +504,19 @@ export class TrafficSystem {
 
     private _projectedHandles: number[] = [];
 
-    /** Drivable height beneath a yawed point on a vehicle's local footprint. */
-    private _heightAtLocal(
-        localX: number,
-        localZ: number,
-        centreX: number,
-        centreWorldZ: number,
-        yaw: number,
-    ): number {
-        const sin = Math.sin(yaw);
-        const cos = Math.cos(yaw);
-        const x = centreX + localX * cos + localZ * sin;
-        // Render Z is mirrored relative to absolute world Z.
-        const z = centreWorldZ + localX * sin - localZ * cos;
-        return surfaceHeightAt(x, z);
-    }
-
-    /** Lowest ground-pivot height that keeps the whole tilted body above the road. */
-    private _requiredCentreHeight(
-        v: TrafficVehicle,
-        centreX: number,
-        pitch: number,
-        yaw: number,
-        roll: number,
-    ): number {
-        this._rideEuler.set(pitch, yaw, roll, 'YXZ');
-        this._rideQuaternion.setFromEuler(this._rideEuler);
-
-        let required = -Infinity;
-        // Corners, edge centres and the chassis centre make long vehicles
-        // behave correctly over both crests and dips without frame allocations.
-        for (let xi = -1; xi <= 1; xi++) {
-            for (let zi = -1; zi <= 1; zi++) {
-                const localX = xi * v.halfWidth;
-                const localZ = zi * v.halfLength;
-                this._ridePoint
-                    .set(localX, 0, localZ)
-                    .applyQuaternion(this._rideQuaternion);
-                const need = this._heightAtLocal(
-                    localX, localZ, centreX, v.worldZ, yaw,
-                ) - this._ridePoint.y;
-                if (need > required) required = need;
-            }
-        }
-        return required;
-    }
-
     private _place(v: TrafficVehicle, travelled: number): void {
         const x = this.worldXOf(v);
         // Road yaw follows the curve; lane yaw turns the body into its lateral
         // path during an overtake and smoothly returns it to the lane afterward.
         const yaw = roadHeadingAt(v.worldZ) + v.laneYaw;
 
-        // Sample the four yawed footprint corners. A centre sample gives the
-        // wrong height and no roll, which is especially visible on descents and
-        // while a long vehicle crosses a crest.
-        const frontLeft = this._heightAtLocal(
-            -v.halfWidth, -v.halfLength, x, v.worldZ, yaw,
-        );
-        const frontRight = this._heightAtLocal(
-            v.halfWidth, -v.halfLength, x, v.worldZ, yaw,
-        );
-        const rearLeft = this._heightAtLocal(
-            -v.halfWidth, v.halfLength, x, v.worldZ, yaw,
-        );
-        const rearRight = this._heightAtLocal(
-            v.halfWidth, v.halfLength, x, v.worldZ, yaw,
-        );
-        const front = (frontLeft + frontRight) * 0.5;
-        const rear = (rearLeft + rearRight) * 0.5;
-        const left = (frontLeft + rearLeft) * 0.5;
-        const right = (frontRight + rearRight) * 0.5;
-        const pitch = Math.atan2(front - rear, v.halfLength * 2);
-        const roll = Math.atan2(right - left, v.halfWidth * 2);
+        this._grounding.solve(v.tyreContacts, x, v.worldZ, yaw);
+        const { pitch, roll, height } = this._grounding;
 
         const obj = v.group.object3D;
         obj.position.set(
             x,
-            this._requiredCentreHeight(v, x, pitch, yaw, roll),
+            height,
             travelled - v.worldZ,
         );
         // YXZ keeps pitch and road roll local to the yawed vehicle body.

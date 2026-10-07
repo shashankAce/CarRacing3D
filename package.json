@@ -11,6 +11,8 @@
     "build:debug": "vite build --mode debug",
     "clean": "rm -rf build",
     "types": "tsc --noEmit",
+    "test:grounding": "node tests/vehicle-grounding.mjs",
+    "test:shadows": "node tests/vehicle-shadows.mjs",
     "pack:facebook": "node engine/bin/pack-platform.js --platform=facebook",
     "pack:facebook:init": "node engine/bin/pack-platform.js --platform=facebook --init",
     "pack:telegram": "node engine/bin/pack-platform.js --platform=telegram",

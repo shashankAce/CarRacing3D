@@ -364,9 +364,8 @@ export class GameScene extends Scene {
             this._projected.setTreeMaskPlane(this._car.position.y);
             this._syncScatter();
 
-            // Projected shadows are pure uniform writes — no geometry, no
-            // render target — so this is just "collect the casters, keep the
-            // nearest few". Ordered after the car and traffic have moved.
+            // Capture the current vehicle poses after the car and traffic move,
+            // then publish the matching receiver uniforms.
             if (cfg.lighting.projectedShadows.enabled) {
                 this._projected.begin();
                 this._car.addProjected(this._projected);
@@ -381,7 +380,14 @@ export class GameScene extends Scene {
             // Rendered here rather than in a draw callback because the engine
             // renders the scene straight after `update`, and the ground
             // materials sample this mask in that same frame.
-            if (this._renderer) this._treeMask?.render(this._renderer);
+            if (this._renderer) {
+                this._treeMask?.render(this._renderer);
+                // These offscreen draws run during update, before NoonEngine
+                // uses the shared GL context. Its draws can replace texture
+                // bindings behind Three's cache. Start the main scene with a
+                // fresh cache so every shadow sampler is bound again.
+                this._renderer.resetState();
+            }
             this._markers.update();
         } else if (this._input.consumeTap()) {
             this._restart();

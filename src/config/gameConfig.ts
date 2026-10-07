@@ -21,7 +21,8 @@ export const gameConfig = {
 
     /** Design resolution. Portrait — see ARCHITECTURE.md §6 D4. */
     design: {
-        width: 720,
+        // width: 720,
+        width: 1280,
         height: 1280,
     },
 
@@ -348,6 +349,8 @@ export const gameConfig = {
      * the road (§6 D2) rather than snapping between lanes.
      */
     traffic: {
+        /** Temporarily disabled while inspecting player tyre contact on slopes. */
+        enabled: true,
         /** QA mode: keep the seeded traffic in place for close shadow inspection. */
         frozen: false,
         laneCount: 4,
@@ -1133,6 +1136,14 @@ export const gameConfig = {
      * `height` makes the same m/s feel slower, every time.
      */
     camera: {
+        /** Temporary gameplay view for checking tyre contact and shadows. */
+        sideInspection: {
+            enabled: false,
+            distance: 17,
+            height: 0.15,
+            rearOffset: 1.5,
+            fov: 45,
+        },
         fov: 71,
         /**
          * `far` must exceed `sky.domeRadius`, which must in turn exceed the
@@ -1442,7 +1453,7 @@ export const gameConfig = {
          * the whole "draping on irregular terrain" problem disappears: every
          * fragment resolves its own shadow at its own position.
          *
-         * Zero extra draw calls and zero per-frame render targets. The cost is
+         * One capture draw per changed vehicle pose into a reused atlas. The cost is
          * per fragment on every receiver and scales with `maxCasters`.
          *
          * Handles the CAR and TRAFFIC. It cannot handle trees — `trees
@@ -1451,7 +1462,7 @@ export const gameConfig = {
          * .selfShadow` for the ground's own shading, which is unrelated.
          *
          * Like everything else here, it relies on the hour being fixed at boot:
-         * the silhouette atlas is baked once for one light direction.
+         * vehicle poses are captured against that fixed world light direction.
          */
         projectedShadows: {
             enabled: true,

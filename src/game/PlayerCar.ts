@@ -3,7 +3,7 @@ import { Node, Scene } from 'noonengine';
 import { Group3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import { roadCenterX } from '../world/roadPath';
-import { surfaceHeightAt } from '../procedural/heightField';
+import { VehicleGrounding, fallbackTyreContacts } from './VehicleGrounding';
 import type { ProjectedShadows } from '../world/ProjectedShadows';
 import type { VehicleVisual } from '../assets/VehicleModels';
 
@@ -48,13 +48,12 @@ export class PlayerCar {
     private _x = 0;
     /** Damped steering yaw; negative points right because local forward is -Z. */
     private _yaw = 0;
-    /** Damped ride height, pitch and roll — the suspension's state. */
+    /** Tyre-supported chassis height, pitch and roll. */
     private _y = 0;
     private _pitch = 0;
     private _roll = 0;
-    private _rideEuler = new THREE.Euler(0, 0, 0, 'YXZ');
-    private _rideQuaternion = new THREE.Quaternion();
-    private _ridePoint = new THREE.Vector3();
+    private _grounding = new VehicleGrounding();
+    private _tyreContacts = fallbackTyreContacts(this._width, this._length);
     /** True while the car is pinned against a road edge. */
     private _againstEdge = false;
 
@@ -112,7 +111,7 @@ export class PlayerCar {
         shadows.add(
             this._projectedHandle,
             obj.position.x, obj.position.y, obj.position.z,
-            obj.rotation.y,
+            obj.quaternion,
             -1,
         );
     }
@@ -138,6 +137,8 @@ export class PlayerCar {
         this._width = visual.dimensions.width;
         this._height = visual.dimensions.height;
         this._length = visual.dimensions.length;
+        this._tyreContacts = visual.tyreContacts.length >= 3
+            ? visual.tyreContacts : fallbackTyreContacts(this._width, this._length);
         this._materials = visual.materials;
         this._shadowGeometries = visual.shadowGeometries;
         this._spinWheels = visual.spinWheels;
@@ -152,55 +153,12 @@ export class PlayerCar {
         }
     }
 
-    /** Drivable height beneath a yawed point on the car's local ground plane. */
-    private _heightAtLocal(
-        localX: number,
-        localZ: number,
-        centreX: number,
-        centreWorldZ: number,
-    ): number {
-        const sin = Math.sin(this._yaw);
-        const cos = Math.cos(this._yaw);
-        const x = centreX + localX * cos + localZ * sin;
-        // Render Z is mirrored relative to absolute world Z.
-        const z = centreWorldZ + localX * sin - localZ * cos;
-        return surfaceHeightAt(x, z);
-    }
-
-    /** Lowest origin height that keeps the yawed, tilted footprint above ground. */
-    private _requiredHeight(
-        centreX: number,
-        centreWorldZ: number,
-        pitch: number,
-        roll: number,
-    ): number {
-        this._rideEuler.set(pitch, this._yaw, roll, 'YXZ');
-        this._rideQuaternion.setFromEuler(this._rideEuler);
-
-        const hw = this.halfWidth;
-        const hl = this.halfLength;
-        let required = -Infinity;
-        // Corners, axle centres and chassis centre handle slopes, dips and crests
-        // without allocating contact objects during the frame.
-        for (let xi = -1; xi <= 1; xi++) {
-            for (let zi = -1; zi <= 1; zi++) {
-                const localX = xi * hw;
-                const localZ = zi * hl;
-                this._ridePoint.set(localX, 0, localZ).applyQuaternion(this._rideQuaternion);
-                const need = this._heightAtLocal(localX, localZ, centreX, centreWorldZ)
-                    - this._ridePoint.y;
-                if (need > required) required = need;
-            }
-        }
-        return required;
-    }
-
     /**
      * @param axis    -1 … +1 from InputController.
      * @param worldZ  The car's absolute world Z — i.e. `scroll.travelled`, since
      *                the car always renders at z ≈ 0.
      * @param speed   Forward road speed, m/s — drives the yaw path and wheels.
-     * @param speedT  Selected vehicle's normalized speed, from 0 to 1.
+     * @param speedT  Selected vehicle's normalized speed, retained for callers.
      */
     update(dt: number, axis: number, worldZ: number, speed: number, speedT: number): void {
         const steering = cfg.car.steering;
@@ -230,49 +188,12 @@ export class PlayerCar {
         const bodyRenderZ = pivotZ * (1 - Math.cos(this._yaw));
         const bodyWorldZ = worldZ - bodyRenderZ;
 
-        // Derive the supporting road plane from the four actual tyre contact
-        // locations after yaw. Axis-aligned samples were the reason the body
-        // stopped matching the road whenever it was turned on a slope.
-        const wheel = cfg.car.wheel;
-        const wheelX = this.halfWidth * 0.84;
-        const axleZ = this.halfLength * wheel.axleOffset;
-        const frontLeft = this._heightAtLocal(-wheelX, -axleZ, bodyX, bodyWorldZ);
-        const frontRight = this._heightAtLocal(wheelX, -axleZ, bodyX, bodyWorldZ);
-        const rearLeft = this._heightAtLocal(-wheelX, axleZ, bodyX, bodyWorldZ);
-        const rearRight = this._heightAtLocal(wheelX, axleZ, bodyX, bodyWorldZ);
-        const front = (frontLeft + frontRight) * 0.5;
-        const rear = (rearLeft + rearRight) * 0.5;
-        const left = (frontLeft + rearLeft) * 0.5;
-        const right = (frontRight + rearRight) * 0.5;
-
-        // Rotating about +X tilts the forward axis (-Z) up, so a front higher
-        // than the rear is positive pitch. Negative +Z rotation raises the left
-        // tyre, so left-high ground produces negative roll.
-        const targetPitch = Math.atan2(front - rear, axleZ * 2);
-        const targetRoll = Math.atan2(right - left, wheelX * 2);
-
-        const suspension = cfg.car.suspension;
-        const tiltK = 1 - Math.exp(-suspension.tiltResponse * dt);
-        this._pitch += (targetPitch - this._pitch) * tiltK;
-        this._roll += (targetRoll - this._roll) * tiltK;
-
-        const floor = this._requiredHeight(bodyX, bodyWorldZ, this._pitch, this._roll);
-        const heightK = 1 - Math.exp(-suspension.heightResponse * dt);
-        this._y += (floor - this._y) * heightK;
-
-        // Clamp both sides of the damped travel. Rising ground cannot penetrate
-        // the car, and falling ground cannot open the large gap that read as
-        // floating on descents.
-        if (this._y < floor) this._y = floor;
-        const ceiling = floor + suspension.maxGroundGap;
-        if (this._y > ceiling) this._y = ceiling;
+        this._grounding.solve(this._tyreContacts, bodyX, bodyWorldZ, this._yaw);
+        this._pitch = this._grounding.pitch;
+        this._roll = this._grounding.roll;
+        this._y = this._grounding.height;
 
         const obj = this._group.object3D;
-        // Roll stacks on the ground tilt. Yaw follows steering input directly;
-        // roll grows with both steering amount and speed.
-        const turnT = steering.maxYawAngle === 0 ? 0 : -this._yaw / steering.maxYawAngle;
-        const speedFactor = THREE.MathUtils.clamp(speedT, 0, 1);
-
         // THREE rotates an object about its centre. Translate that centre along
         // the arc around a fixed rear pivot so the rear stays planted and the
         // nose visibly sweeps into the turn instead of merely spinning in place.
@@ -281,11 +202,12 @@ export class PlayerCar {
             this._y,
             bodyRenderZ,
         );
-        // YXZ keeps pitch and ground roll local to the yawed chassis.
+        // YXZ keeps pitch and ground roll local to the yawed chassis. Extra
+        // steering bank would rotate the rigid tyre assembly off this plane.
         obj.rotation.set(
             this._pitch,
             this._yaw,
-            this._roll + turnT * steering.maxRollAngle * speedFactor,
+            this._roll,
             'YXZ',
         );
         this._spinWheels(worldZ);
@@ -295,11 +217,12 @@ export class PlayerCar {
     reset(): void {
         this._x = roadCenterX(0);
         this._yaw = 0;
-        this._pitch = 0;
-        this._roll = 0;
-        this._y = this._requiredHeight(this._x, 0, 0, 0);
+        this._grounding.solve(this._tyreContacts, this._x, 0, 0);
+        this._pitch = this._grounding.pitch;
+        this._roll = this._grounding.roll;
+        this._y = this._grounding.height;
         this._againstEdge = false;
         this._group.object3D.position.set(this._x, this._y, 0);
-        this._group.object3D.rotation.set(0, 0, 0, 'YXZ');
+        this._group.object3D.rotation.set(this._pitch, 0, this._roll, 'YXZ');
     }
 }

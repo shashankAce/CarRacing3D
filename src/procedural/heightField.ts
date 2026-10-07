@@ -224,7 +224,14 @@ export function heightAt(x: number, z: number): number {
  */
 export function surfaceHeightAt(x: number, z: number): number {
     const distToCenter = Math.abs(x - roadCenterX(z));
-    if (distToCenter <= cfg.road.halfWidth) return roadLevelAt(z) + cfg.roadSurface.lift;
+    if (distToCenter <= cfg.road.halfWidth) {
+        // Match the ribbon's straight triangle segments, not the analytic curve
+        // between its vertices. Otherwise tyres hover above dips in the mesh.
+        const step = cfg.roadSurface.bandLength / cfg.roadSurface.segmentsPerBand;
+        const start = Math.floor(z / step) * step;
+        const t = (z - start) / step;
+        return lerp(roadLevelAt(start), roadLevelAt(start + step), t) + cfg.roadSurface.lift;
+    }
     return heightAt(x, z);
 }
 

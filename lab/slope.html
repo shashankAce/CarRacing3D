@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="/">
+  <title>Coupe slope inspection</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #151e29; color: #edf3f8; overflow: hidden; }
+    canvas { display: block; }
+    header { position: absolute; top: 22px; left: 28px; pointer-events: none; }
+    h1 { margin: 0 0 5px; font-size: 23px; letter-spacing: -.6px; }
+    header p { margin: 0; color: #9db2c5; font-size: 13px; }
+    aside { position: absolute; top: 22px; right: 24px; width: 265px; padding: 18px; border: 1px solid #3b4d60; background: #172331ed; border-radius: 12px; }
+    label { display: block; font-size: 13px; margin: 0 0 16px; }
+    input { width: 100%; margin: 9px 0 0; accent-color: #61c9dc; }
+    output { float: right; color: #67d4e5; font-variant-numeric: tabular-nums; }
+    .buttons { display: flex; gap: 5px; margin-bottom: 16px; }
+    button { flex: 1; border: 1px solid #50657b; border-radius: 6px; padding: 7px; background: #24354a; color: #edf3f8; cursor: pointer; }
+    button.active { background: #275f73; border-color: #67d4e5; }
+    #stats { font: 12px/1.8 ui-monospace, monospace; white-space: pre-line; color: #c8d7e3; border-top: 1px solid #3b4d60; padding-top: 12px; }
+    footer { position: absolute; bottom: 20px; left: 28px; color: #9db2c5; font-size: 12px; }
+    #loading { position: absolute; left: 28px; top: 92px; color: #f8c878; }
+    @media(max-width:700px) { aside { top: auto; bottom: 18px; width: 235px; } footer { display: none; } }
+  </style>
+</head>
+<body>
+  <header><h1>Coupe · slope inspection</h1><p>Actual gameplay model and wheels · fixed ramp · no driving required</p></header>
+  <aside>
+    <label>Slope grade <output id="grade-value">20%</output><input id="grade" aria-label="Slope grade" type="range" min="-30" max="30" value="20" step="1"></label>
+    <label>Wheel travel <output id="travel-value">0.00 m</output><input id="travel" aria-label="Wheel travel" type="range" min="0" max="8" value="0" step="0.01"></label>
+    <div class="buttons"><button id="side" class="active">Side</button><button id="rear">Rear</button><button id="orbit">Orbit</button></div>
+    <div class="buttons"><button id="uphill">Uphill</button><button id="downhill">Downhill</button><button id="flat">Flat</button></div>
+    <label><input id="guides" type="checkbox" checked style="width:auto; margin:0 7px 0 0">Show tyre contact guides</label>
+    <label><input id="upright-shadow" type="checkbox" style="width:auto; margin:0 7px 0 0">Compare old upright shadow</label>
+    <div id="stats">Loading coupe…</div>
+  </aside>
+  <div id="loading">Loading the game vehicle catalog…</div>
+  <footer>Drag to orbit · Scroll to zoom · Cyan dots show the lowest rendered tyre vertices · Front points left in side view</footer>
+  <script type="module" src="/lab/slope.ts"></script>
+</body>
+</html>
