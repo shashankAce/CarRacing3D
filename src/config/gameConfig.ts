@@ -888,8 +888,19 @@ export const gameConfig = {
         loadingText: 'LOADING CARS…',
         driveText: 'DRIVE THIS CAR',
         headerHeight: 100,
-        titleMainX: -110,
-        titleAccentX: 63,
+        /**
+         * Space between the two words of the header. The pair is centred as ONE
+         * unit by the panel's layout (see `CarSelectPanel._makeHeader`), so this
+         * is the only horizontal knob the header needs — per-word X offsets
+         * could only ever be centred for the one window width they were tuned
+         * at, and the header they were measured against was pinned to
+         * `design.width` rather than to the visible rect.
+         *
+         * 6 reproduces the spacing the old `titleMainX`/`titleAccentX` pair
+         * worked out to for this font (`173 - (245.30 + 88.61) / 2`), so the
+         * only intended change is the centring.
+         */
+        titleGap: 6,
         titleBaselineY: 0,
         arrowY: 650,
         arrowEdge: 28,

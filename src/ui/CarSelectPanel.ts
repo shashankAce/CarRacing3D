@@ -3,6 +3,7 @@ import {
     ColorRect,
     Input,
     Label,
+    Layout,
     Node,
     Scene,
     Sprite,
@@ -183,9 +184,14 @@ export class CarSelectPanel {
         header.height = c.headerHeight;
         const widget = header.addComponent(Widget);
         widget.alignToWindow = true;
+        // BOTH edges, so the widget sets the width from the visible rect as well
+        // as the position. With `left` alone the node kept the `design.width`
+        // width it was constructed with and was merely hung off the window's
+        // left edge, so the header's centre only coincided with the screen
+        // centre at exactly the design width — on every other aspect ratio the
+        // whole header, title included, sat off-centre by half the difference.
         widget.left = 0;
-        // widget.right = 0;
-        // widget.top = 0;
+        widget.right = 0;
 
         const background = header.addComponent(Sprite);
         background.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -205,25 +211,31 @@ export class CarSelectPanel {
         edgeWidget.right = 0;
         header.addChild(lowerEdge);
 
-        const title = this._makeLabel(
-            header,
-            c.titleMainX,
-            c.titleBaselineY,
-            c.titleFontSize,
-            c.titleColor,
-        );
+        // One container for both words, centred on the header's own centre
+        // point (`anchorX = 0.5` at local x = 0) and sized by the layout itself.
+        // The two labels carry no X offset of their own, so the title is
+        // symmetric about the screen centre at ANY window size — there is no
+        // tuned number left to drift out of date.
+        const titleGroup = new Node(0, c.titleBaselineY);
+        titleGroup.name = 'SelectYourRideTitle';
+        titleGroup.anchorX = 0.5;
+        const titleLayout = titleGroup.addComponent(Layout);
+        titleLayout.layoutType = Layout.Type.HORIZONTAL;
+        // CONTAINER: the node wraps the measured label widths, so the layout
+        // re-centres by itself once the fonts have been measured.
+        titleLayout.resizeMode = Layout.ResizeMode.CONTAINER;
+        titleLayout.spacingX = c.titleGap;
+        titleLayout.hAlign = Layout.HAlign.CENTER;
+        titleLayout.vAlign = Layout.VAlign.MIDDLE;
+        header.addChild(titleGroup);
+
+        const title = this._makeLabel(titleGroup, 0, 0, c.titleFontSize, c.titleColor);
         title.text = c.title;
         title.fontFamily = 'rajdhani_bold';
         title.fontStyle = 'italic';
         title.letterSpacing = 5;
 
-        const accent = this._makeLabel(
-            header,
-            c.titleAccentX,
-            c.titleBaselineY,
-            c.titleFontSize,
-            c.titleAccentColor,
-        );
+        const accent = this._makeLabel(titleGroup, 0, 0, c.titleFontSize, c.titleAccentColor);
         accent.text = c.titleAccent;
         accent.fontFamily = 'rajdhani_bold';
         accent.fontStyle = 'italic';
