@@ -123,6 +123,8 @@ export class ProjectedShadows {
 
     private _origin: THREE.Vector4[] = [];
     private _shape: THREE.Vector4[] = [];
+    /** UV origin of each slot's atlas cell. See `commit` for why it is a uniform. */
+    private _cell: THREE.Vector2[] = [];
     /** Conservative render-space XZ rectangles for a cheap pre-loop reject. */
     private _bounds: THREE.Vector4[] = [];
 
@@ -149,6 +151,7 @@ export class ProjectedShadows {
         for (let i = 0; i < this._slots; i++) {
             this._origin.push(new THREE.Vector4(0, ProjectedShadows.PARKED_Y, 0, 0));
             this._shape.push(new THREE.Vector4(0, 0, 0, 0));
+            this._cell.push(new THREE.Vector2(0, 0));
             // min > max makes every finite fragment fail the bounds test.
             this._bounds.push(new THREE.Vector4(1, 1, -1, -1));
         }
@@ -158,6 +161,7 @@ export class ProjectedShadows {
             uProjShadowAtlas: { value: null },
             uProjShadowOrigin: { value: this._origin },
             uProjShadowShape: { value: this._shape },
+            uProjShadowCell: { value: this._cell },
             uProjShadowR: { value: this._frame.R },
             uProjShadowU: { value: this._frame.U },
             uProjShadowBounds: { value: this._bounds },
@@ -311,6 +315,7 @@ varying vec3 vProjShadowWorld;
 uniform sampler2D uProjShadowAtlas;
 uniform vec4 uProjShadowOrigin[${count}];
 uniform vec4 uProjShadowShape[${count}];
+uniform vec2 uProjShadowCell[${count}];
 uniform vec3 uProjShadowR;
 uniform vec3 uProjShadowU;
 uniform vec4 uProjShadowBounds[${count}];
@@ -381,8 +386,13 @@ float projShadowFactor() {
         vec2 cellUv = vec2((r - shape.x) * shape.z, (u - shape.y) * shape.w);
         if (cellUv.x < 0.0 || cellUv.x > 1.0 || cellUv.y < 0.0 || cellUv.y > 1.0) continue;
 
-        vec2 cell = vec2(mod(float(i), uProjShadowGrid.x), floor(float(i) * uProjShadowGrid.z));
-        vec4 atlasSample = texture2D(uProjShadowAtlas, (cell + cellUv) * uProjShadowGrid.zw);
+        // The atlas cell is a CPU-computed uniform, NOT mod/floor of the loop
+        // index. Deriving it here looked harmless but is not portable: mod(3, 3)
+        // returns 3 on ANGLE/D3D11 (AMD), so slot 3 of a 3-column atlas sampled
+        // one cell past the right edge, clamped to the atlas border, and that
+        // vehicle silently lost its shadow. Integer work belongs on the CPU.
+        vec2 cell = uProjShadowCell[i];
+        vec4 atlasSample = texture2D(uProjShadowAtlas, cell + cellUv * uProjShadowGrid.zw);
         // Green is the nearest captured surface along this exact light ray.
         // Unlike a centre-depth test it does not assume the caster origin is the
         // near edge, so a wheel ahead of the origin is not clipped away.
@@ -450,12 +460,14 @@ void main() {`)
         const live = Math.min(pending.length, this._slots);
         this._posedAtlas!.update(this._renderer!, pending, live);
 
+        const { cols, rows } = this._atlas;
         for (let i = 0; i < live; i++) {
             const p = pending[i];
             const cell = this._atlas.cells[i];
 
             this._origin[i].set(p.x, p.y, p.z, p.handle);
             this._shape[i].set(cell.rMin, cell.uMin, cell.invSpanR, cell.invSpanU);
+            this._cell[i].set(i % cols / cols, Math.floor(i / cols) / rows);
 
             this._writeBounds(i, p.x, p.z);
         }

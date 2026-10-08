@@ -93,7 +93,12 @@ try {
     material.onBeforeCompile(shader);
     assert.ok(shader.fragmentShader.includes('dot(rel, uProjShadowR)'));
     assert.ok(shader.fragmentShader.includes('dot(rel, uProjShadowU)'));
-    assert.ok(shader.fragmentShader.includes('mod(float(i), uProjShadowGrid.x)'), 'atlas cell follows live slot');
+    // The cell is a CPU-provided UV origin. Decoding the slot index inside the
+    // shader with `mod(i, cols)` is what shipped broken: `mod(3.0, 3.0)` is 3.0
+    // on ANGLE/D3D11, so one slot sampled past the atlas and lost its shadow.
+    assert.ok(shader.fragmentShader.includes('uProjShadowCell[i]'), 'atlas cell follows live slot');
+    assert.ok(!shader.fragmentShader.includes('mod(float(i)'), 'atlas cell is not decoded on the GPU');
+    assert.ok(!shader.fragmentShader.includes('floor(float(i)'), 'atlas cell row is not decoded on the GPU');
     assert.ok(shader.fragmentShader.includes(`abs(origin.w - ${handle}.0)`), 'self skip follows model handle');
     const frame = lightFrame(cfg.lighting.sunDirection);
     let poses = 0;
@@ -107,6 +112,11 @@ try {
             'full pitch/yaw/roll reaches actual capture');
         const origin = shader.uniforms.uProjShadowOrigin.value[0];
         assert.deepEqual(origin.toArray(), [2, 8, -10, handle]);
+        // Slot 1 must point at cell 1's own UV origin, computed on the CPU.
+        const atlas = shadows._atlas;
+        const cells = shader.uniforms.uProjShadowCell.value;
+        assert.deepEqual(cells[0].toArray(), [0, 0]);
+        assert.deepEqual(cells[1].toArray(), [1 / atlas.cols, 0]);
         const coarse = shader.uniforms.uProjShadowBounds.value[0];
         for (const tyrePoint of tyrePoints) {
             const posed = tyrePoint.clone().applyQuaternion(rotation);

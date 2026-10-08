@@ -58,7 +58,13 @@ export class TreeShadowMask {
     private _centre: THREE.InstancedBufferAttribute;
     private _along: THREE.InstancedBufferAttribute;
     private _across: THREE.InstancedBufferAttribute;
-    private _cell: THREE.InstancedBufferAttribute;
+    /**
+     * The atlas cell's UV ORIGIN per instance, not its index. The index had to
+     * be decoded in the shader with `mod(cell, cols)`, and `mod(3.0, 3.0)`
+     * returns 3.0 on ANGLE/D3D11 — so the fourth impostor variant sampled one
+     * cell past the atlas and lost its shadow. The decode is exact on the CPU.
+     */
+    private _cellUv: THREE.InstancedBufferAttribute;
     private _geometry: THREE.InstancedBufferGeometry;
 
     private _live = 0;
@@ -66,7 +72,7 @@ export class TreeShadowMask {
     private _centreDirty = false;
     private _alongDirty = false;
     private _acrossDirty = false;
-    private _cellDirty = false;
+    private _cellUvDirty = false;
     /** World travel origin represented by the current centre buffer. */
     private _anchor = Number.NaN;
     /** World-space rect the mask currently covers: x0, z0, size. */
@@ -98,15 +104,15 @@ export class TreeShadowMask {
         this._centre = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
         this._along = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
         this._across = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
-        this._cell = new THREE.InstancedBufferAttribute(new Float32Array(max), 1);
+        this._cellUv = new THREE.InstancedBufferAttribute(new Float32Array(max * 2), 2);
         this._centre.setUsage(THREE.DynamicDrawUsage);
         this._along.setUsage(THREE.DynamicDrawUsage);
         this._across.setUsage(THREE.DynamicDrawUsage);
-        this._cell.setUsage(THREE.DynamicDrawUsage);
+        this._cellUv.setUsage(THREE.DynamicDrawUsage);
         quad.setAttribute('iCentre', this._centre);
         quad.setAttribute('iAlong', this._along);
         quad.setAttribute('iAcross', this._across);
-        quad.setAttribute('iCell', this._cell);
+        quad.setAttribute('iCellUv', this._cellUv);
         quad.instanceCount = 0;
         this._geometry = quad;
 
@@ -122,11 +128,11 @@ export class TreeShadowMask {
                 attribute vec2 iCentre;
                 attribute vec2 iAlong;
                 attribute vec2 iAcross;
-                attribute float iCell;
+                attribute vec2 iCellUv;
                 uniform vec3 uRect;
+                uniform vec4 uGrid;
                 uniform float uScrollZ;
                 varying vec2 vCellUv;
-                varying float vCell;
                 void main() {
                     // Ground position of this quad corner, in render-space XZ.
                     vec2 p = iCentre + iAcross * corner.x + iAlong * corner.y;
@@ -135,23 +141,21 @@ export class TreeShadowMask {
                     // so there is no camera worth constructing for it.
                     vec2 ndc = (p - uRect.xy) / uRect.z * 2.0 - 1.0;
                     gl_Position = vec4(ndc, 0.0, 1.0);
-                    vCellUv = corner + 0.5;
-                    vCell = iCell;
+                    // Cell origin + this corner's place inside it. Both terms are
+                    // plain adds and multiplies of CPU-provided values.
+                    vCellUv = iCellUv + (corner + 0.5) * uGrid.zw;
                 }
             `,
             fragmentShader: `
                 precision mediump float;
                 uniform sampler2D uAtlas;
-                uniform vec4 uGrid;
                 varying vec2 vCellUv;
-                varying float vCell;
                 void main() {
-                    vec2 cell = vec2(mod(vCell, uGrid.x), floor(vCell * uGrid.z));
                     // Alpha is coverage, red is the occluder's height. Both are
                     // carried through under MAX blending, so where two canopies
                     // overlap the taller one's height survives — which is the
                     // right answer for "is anything above this fragment".
-                    vec4 t = texture2D(uAtlas, (cell + vCellUv) * uGrid.zw);
+                    vec4 t = texture2D(uAtlas, vCellUv);
                     gl_FragColor = vec4(t.r, 0.0, 0.0, t.a);
                 }
             `,
@@ -242,7 +246,7 @@ export class TreeShadowMask {
         this._centreDirty = false;
         this._alongDirty = false;
         this._acrossDirty = false;
-        this._cellDirty = false;
+        this._cellUvDirty = false;
     }
 
     /**
@@ -252,7 +256,7 @@ export class TreeShadowMask {
      */
     add(handle: number, x: number, _groundY: number, worldZ: number, scale: number): void {
         if (this._atlas === null) return;
-        const max = this._cell.count;
+        const max = this._cellUv.count;
         if (this._live >= max) return;
 
         const r = this._rect;
@@ -299,8 +303,11 @@ export class TreeShadowMask {
         const centre = this._centre.array;
         const alongArray = this._along.array;
         const acrossArray = this._across.array;
-        const cellArray = this._cell.array;
+        const cellUvArray = this._cellUv.array;
         const j = i * 2;
+        const cols = this._atlas.cols, rows = this._atlas.rows;
+        const cellU = cell.cell % cols / cols;
+        const cellV = Math.floor(cell.cell / cols) / rows;
         // Compare in the attribute's real storage precision. Comparing its
         // float32 value with an unrounded JS double would report a false change
         // on almost every frame and silently defeat this optimization.
@@ -320,9 +327,9 @@ export class TreeShadowMask {
             acrossArray[j] = acrossX; acrossArray[j + 1] = acrossZ;
             this._acrossDirty = true;
         }
-        if (cellArray[i] !== cell.cell) {
-            cellArray[i] = cell.cell;
-            this._cellDirty = true;
+        if (cellUvArray[j] !== cellU || cellUvArray[j + 1] !== cellV) {
+            cellUvArray[j] = cellU; cellUvArray[j + 1] = cellV;
+            this._cellUvDirty = true;
         }
     }
 
@@ -337,7 +344,7 @@ export class TreeShadowMask {
         this._uploadIfDirty(this._centre, this._centreDirty, rangeLive * 2);
         this._uploadIfDirty(this._along, this._alongDirty, rangeLive * 2);
         this._uploadIfDirty(this._across, this._acrossDirty, rangeLive * 2);
-        this._uploadIfDirty(this._cell, this._cellDirty, rangeLive);
+        this._uploadIfDirty(this._cellUv, this._cellUvDirty, rangeLive * 2);
     }
 
     private _uploadIfDirty(
