@@ -1,6 +1,7 @@
 import {
     BitmapText,
     ColorRect,
+    Graphics,
     Input,
     Label,
     Layout,
@@ -48,6 +49,7 @@ export class CarSelectPanel {
     private readonly _interactiveNodes: Node[] = [];
     private readonly _driveButton: Node;
     private _dragZone!: Node;
+    private _dragZoneDebug: Node | null = null;
     private _index = 0;
     private _visible = false;
     private _dragPointerId: number | null = null;
@@ -256,7 +258,7 @@ export class CarSelectPanel {
 
     private _makeDragZone(): void {
         const c = cfg.carSelect.showroom.drag;
-        const node = new Node(cfg.design.width / 2, c.centerY);
+        const node = new Node(c.centerX, c.centerY);
         node.name = 'ShowroomCarDragZone';
         node.width = c.width;
         node.height = c.height;
@@ -264,6 +266,11 @@ export class CarSelectPanel {
         this._root.addChild(node);
         this._interactiveNodes.push(node);
         this._dragZone = node;
+
+        if (cfg.debug.showDragZone) {
+            const color = node.addComponent(ColorRect);
+            color.color = '#a0313156'
+        }
     }
 
     private _onDragStart(e: any): void {

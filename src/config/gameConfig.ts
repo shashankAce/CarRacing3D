@@ -22,7 +22,7 @@ export const gameConfig = {
     /** Design resolution. Portrait — see ARCHITECTURE.md §6 D4. */
     design: {
         // width: 720,
-        width: 1280,
+        width: 720,
         height: 1280,
     },
 
@@ -995,7 +995,9 @@ export const gameConfig = {
             drag: {
                 width: 560,
                 height: 430,
-                centerY: 690,
+                /** Horizontal centre of the drag zone in design units. Defaults to screen-centre. */
+                centerX: 640,
+                centerY: 490,
                 sensitivity: 0.007,
                 autoResumeDelay: 0.1,//seconds
             },
@@ -2067,6 +2069,15 @@ export const gameConfig = {
          * answer. Chunks are built once, so this needs a reload to take effect.
          */
         showSlopeBands: false,
+        /**
+         * Draws the car-selection showroom's drag zone as a translucent colour
+         * block with an outline, so the otherwise-invisible input rectangle can
+         * be seen and repositioned (tune `carSelect.showroom.drag.centerX` /
+         * `centerY` / `width` / `height`). Testing-only — turn off before ship.
+         */
+        showDragZone: false,
+        dragZoneColor: 0x35e0a0,
+        dragZoneAlpha: 0x55,
         /**
          * On-screen performance counters: FPS and worst frame time, per-chunk
          * build cost (last / recent peak / all-time peak), resident chunk count,
