@@ -1055,7 +1055,7 @@ export const gameConfig = {
         backdropColor: '#131313',
         trackColor: '#e2202e',
         fillColor: '#e2202e',
-        /** Native loading.jpg aspect ratio; keeping it prevents portrait-art distortion. */
+        /** Native loading.webp aspect ratio; keeping it prevents portrait-art distortion. */
         backgroundImageAspectRatio: 852 / 1846,
         fontFamily: 'MonsterRacing',
         errorText: 'UNABLE TO LOAD VEHICLES',

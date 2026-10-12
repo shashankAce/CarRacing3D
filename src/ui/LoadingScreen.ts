@@ -105,16 +105,16 @@ export class LoadingScreen {
         await assetCache.preloadAssets([
             // Keep the source literal in this preload entry: the playable packer
             // detects it and embeds the image in its single HTML output.
-            { src: 'res/loading.jpg', type: 'image', alias: LOADING_BACKGROUND_ALIAS },
+            { src: 'res/loading.webp', type: 'image', alias: LOADING_BACKGROUND_ALIAS },
             // Kept explicit so production asset trimming retains the atlas page
             // referenced by the BMFont descriptor.
             // { src: 'res/MonsterRacing.png', type: 'image' },
             // { src: 'res/MonsterRacing.json', type: 'bmfont', alias: cfg.loading.fontFamily },
-            { src: 'res/right-chevron.png', type: 'image', alias: CHEVRON_ALIAS },
-            { src: 'res/speedometer.png', type: 'image', alias: STAT_ICON_ALIASES[0] },
-            { src: 'res/acceleration.png', type: 'image', alias: STAT_ICON_ALIASES[1] },
-            { src: 'res/disc-brake.png', type: 'image', alias: STAT_ICON_ALIASES[2] },
-            { src: 'res/pausebtn.png', type: 'image', alias: "pausebtn" },
+            { src: 'res/right-chevron.webp', type: 'image', alias: CHEVRON_ALIAS },
+            { src: 'res/speedometer.webp', type: 'image', alias: STAT_ICON_ALIASES[0] },
+            { src: 'res/acceleration.webp', type: 'image', alias: STAT_ICON_ALIASES[1] },
+            { src: 'res/disc-brake.webp', type: 'image', alias: STAT_ICON_ALIASES[2] },
+            { src: 'res/pausebtn.webp', type: 'image', alias: "pausebtn" },
             { src: 'res/fontTTF/rajdhani-bold.ttf', type: 'font', fontName: 'rajdhani_bold', alias: 'rajdhani_bold' },
             { src: 'res/fontTTF/rajdhani-light.ttf', type: 'font', fontName: 'rajdhani_light', alias: 'rajdhani_light' },
             { src: 'res/fontTTF/Rajdhani-Medium.ttf', type: 'font', fontName: 'rajdhani_medium', alias: 'rajdhani_medium' },
