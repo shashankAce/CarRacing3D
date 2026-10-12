@@ -865,7 +865,7 @@ export const gameConfig = {
             // traffic continues to use its independent `traffic.types` speeds.
             { id: 'sport', label: 'SPORT', description: 'Track-bred pace with instant response.', asset: 'res/models/vehicles/SportCar2.fbx', lod: { vertexReduction: 0.55 }, scale: 0.009, rotationY: Math.PI, width: 2.11, height: 1.24, length: 4.21, speed: { start: 30, min: 20, max: 120, accelerate: 8.2, brake: 16, autoBrake: 14 } },
             { id: 'sedan', label: 'SEDAN', description: 'Balanced, stable and easy to control.', asset: 'res/models/vehicles/Sedan1.fbx', lod: { vertexReduction: 0.55 }, scale: 0.01, rotationY: Math.PI, width: 2.12, height: 1.30, length: 4.60, speed: { start: 28, min: 18, max: 66, accelerate: 6.6, brake: 14, autoBrake: 11 } },
-            { id: 'car', label: 'COUPE', description: 'Agile handling with strong acceleration.', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 75, accelerate: 7.2, brake: 14, autoBrake: 13 } },
+            { id: 'car', label: 'COUPE', description: 'Agile handling with strong acceleration.', asset: 'res/models/vehicles/Car2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.011, rotationY: Math.PI, width: 1.92, height: 1.34, length: 4.20, speed: { start: 29, min: 19, max: 85, accelerate: 7.2, brake: 14, autoBrake: 13 } },
             { id: 'jeep', label: 'JEEP', description: 'Rugged, confident and ready for rough roads.', asset: 'res/models/vehicles/Jeep2.fbx', lod: { vertexReduction: 0.60 }, scale: 0.01, rotationY: Math.PI, width: 2.26, height: 1.80, length: 4.23, speed: { start: 25, min: 16, max: 54, accelerate: 5.0, brake: 12, autoBrake: 10 } },
             { id: 'microbus', label: 'MICRO BUS', description: 'Heavy, dependable and built for control.', asset: 'res/models/vehicles/MicroBus4.fbx', lod: { vertexReduction: 0.55 }, scale: 0.012, rotationY: Math.PI, width: 2.16, height: 2.08, length: 4.86, speed: { start: 22, min: 14, max: 47, accelerate: 4.2, brake: 10, autoBrake: 8 } },
         ],
@@ -1179,6 +1179,26 @@ export const gameConfig = {
         distanceSpeedGain: 1.2,
         /** Extra FOV degrees at top speed. Stretches the periphery; reads as acceleration. */
         fovSpeedGain: 11,
+        /**
+         * Per-car camera height, keyed by `vehicles.models[].id`. A taller vehicle
+         * (e.g. the microbus) shares one framing with the low sport car by default,
+         * so its roof clips the top of frame. Overriding `height` lifts the camera
+         * for that car only; leave a car out to keep the base `height` above.
+         */
+        heightOverrides: { microbus: 5.0 } as Record<string, number>,
+        /**
+         * Per-car look-at target height, keyed by `vehicles.models[].id`. Raises or
+         * lowers where the camera aims so a taller/shortter car stays well framed.
+         * Falls back to the base `lookHeight` when a car isn't listed.
+         */
+        lookHeightOverrides: { microbus: 5.4 } as Record<string, number>,
+        /**
+         * Per-car follow distance, keyed by `vehicles.models[].id`. Pulls the
+         * camera further back so the whole silhouette fits in frame — lifting
+         * `height` alone tilts the view rather than fitting a tall/long vehicle.
+         * Falls back to the base `distance` when a car isn't listed.
+         */
+        distanceOverrides: { microbus: 13.5 } as Record<string, number>,
     },
 
     /**

@@ -55,6 +55,15 @@ export class CarSelectPanel {
     private _dragPointerId: number | null = null;
     private _lastDragX = 0;
     private _lastDesignWidth = -1;
+    /**
+     * Intended stats-panel width, as computed by `_layoutResponsive`. The
+     * container's live `.width` is owned by its Widget (left+right stretch it to
+     * the visible rect, which is narrower than `designWidth` on portrait under
+     * FIXED_HEIGHT), so the bar layout must read THIS, not `_statsContainer.width`
+     * — otherwise the first frame (before WidgetSystem runs) lays out at the full
+     * width and every later `_refresh` re-lays out at the shrunk width.
+     */
+    private _statsWidth = cfg.carSelect.statsPanelWidth;
 
     constructor(
         scene: Scene,
@@ -452,6 +461,7 @@ export class CarSelectPanel {
             Math.max(c.statsPanelMinWidth, designWidth - c.statsPanelLeft - c.statsPanelMinimumRight),
         );
         this._statsContainer.width = statsWidth;
+        this._statsWidth = statsWidth;
         this._statsWidget.right = Math.max(
             c.statsPanelMinimumRight,
             designWidth - c.statsPanelLeft - statsWidth,
@@ -463,7 +473,9 @@ export class CarSelectPanel {
 
     private _layoutStatsBars(): void {
         const c = cfg.carSelect;
-        const statsWidth = this._statsContainer.width;
+        // Use the intended panel width, NOT `_statsContainer.width` — the Widget
+        // stretches that to the (narrower, on portrait) visible rect every frame.
+        const statsWidth = this._statsWidth;
         const valueX = statsWidth - c.statValueRight;
         const valueXX = statsWidth - c.statValueRight - 60;
         const barWidth = Math.max(

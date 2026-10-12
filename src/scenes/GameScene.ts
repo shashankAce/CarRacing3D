@@ -151,6 +151,9 @@ export class GameScene extends Scene {
 
         this._car = new PlayerCar(this);
         this._camera = new FollowCamera(this);
+        // Frame the startup placeholder with the default car's per-vehicle height
+        // so the first snapTo isn't off until a car is actually selected.
+        this._camera.setVehicle(this._defaultVehicleId());
         this._camera.snapTo(this._car);
 
         // The streamers own plain THREE meshes rather than wrapper components:
@@ -600,6 +603,7 @@ export class GameScene extends Scene {
         this._state.setVehicleSpeedProfile(this._vehicleModels.spec(id).speed);
         this._selectedVehicleId = id;
         this._car.setVisual(this._vehicleModels.create(id));
+        this._camera.setVehicle(id);
         this._car.refreshProjectedGeometry(this._projected);
         this._projected.rebake();
         this._attachPlayerMaterials();

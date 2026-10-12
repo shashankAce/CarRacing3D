@@ -3,6 +3,7 @@ import { Node, Scene } from 'noonengine';
 import { Camera3D } from 'noonengine/3d';
 import { gameConfig as cfg } from '../config/gameConfig';
 import type { PlayerCar } from './PlayerCar';
+import type { VehicleModelId } from '../assets/VehicleModels';
 
 /**
  * FollowCamera — TPP chase camera, exponentially damped.
@@ -20,6 +21,10 @@ export class FollowCamera {
     private _camera: Camera3D;
     private _lookAt = new THREE.Vector3();
     private _desired = new THREE.Vector3();
+    /** Resolved per-car framing offsets; default to the base config values. */
+    private _height = cfg.camera.height;
+    private _lookHeight = cfg.camera.lookHeight;
+    private _distance = cfg.camera.distance;
 
     /** The live camera position — the sky dome re-centres on it each frame. */
     get position(): THREE.Vector3 { return this._camera.position; }
@@ -35,6 +40,19 @@ export class FollowCamera {
         scene.addChild(node);
     }
 
+    /**
+     * Applies any per-car framing overrides for the selected vehicle. Taller or
+     * longer vehicles clip against the single shared framing, so a car can lift
+     * the camera, re-aim it, and pull it further back without touching every
+     * other car. Cars with no entry keep the base config values.
+     */
+    setVehicle(id: VehicleModelId): void {
+        const c = cfg.camera;
+        this._height = c.heightOverrides[id] ?? c.height;
+        this._lookHeight = c.lookHeightOverrides[id] ?? c.lookHeight;
+        this._distance = c.distanceOverrides[id] ?? c.distance;
+    }
+
     /** @param speedT 0…1 from GameState — widens FOV and eases back as speed rises. */
     update(dt: number, car: PlayerCar, speedT: number): void {
         const c = cfg.camera;
@@ -42,13 +60,13 @@ export class FollowCamera {
             this._placeSideInspection(car);
             return;
         }
-        const distance = c.distance + speedT * c.distanceSpeedGain;
+        const distance = this._distance + speedT * c.distanceSpeedGain;
         // Player movement stays ground-pivoted. Frame from the visual centre
         // so camera height follows whichever car is selected without affecting
         // steering, speed, collision, or suspension behaviour.
         const baseY = car.position.y + car.visualHeight * 0.5;
 
-        this._desired.set(car.position.x, baseY + c.height, car.position.z + distance);
+        this._desired.set(car.position.x, baseY + this._height, car.position.z + distance);
 
         const k = 1 - Math.exp(-c.followRate * dt);
         const pos = this._camera.position;
@@ -59,7 +77,7 @@ export class FollowCamera {
         // sideways — the world would appear to swing rather than slide. Using
         // the camera's own x keeps the view axis permanently parallel to -Z, so
         // steering reads as pure lateral translation.
-        this._lookAt.set(pos.x, baseY + c.lookHeight, pos.z - c.lookAhead);
+        this._lookAt.set(pos.x, baseY + this._lookHeight, pos.z - c.lookAhead);
         this._camera.lookAt(this._lookAt.x, this._lookAt.y, this._lookAt.z);
 
         // A slightly wider FOV at speed stretches the periphery and reads as
@@ -78,9 +96,9 @@ export class FollowCamera {
         }
         const pos = this._camera.position;
         const baseY = car.position.y + car.visualHeight * 0.5;
-        pos.set(car.position.x, baseY + c.height, car.position.z + c.distance);
+        pos.set(car.position.x, baseY + this._height, car.position.z + this._distance);
         this._camera.fov = c.fov;
-        this._camera.lookAt(pos.x, baseY + c.lookHeight, pos.z - c.lookAhead);
+        this._camera.lookAt(pos.x, baseY + this._lookHeight, pos.z - c.lookAhead);
     }
 
     private _placeSideInspection(car: PlayerCar): void {
